@@ -11,3 +11,6 @@ rocker/rstudio:latest - very nice base for RStudio with R-SWAT added.
 linuxserver/code-server - browser based Visual Studio Code environment for accessing R-swat, python-swat, notebooks etc without using jupyter or r studio
 
 Some work needs to be done on adding a decent Viya cluster to this. A single node programming only is fine for demo I think.
+
+
+Since Visual Studio Code is a plug in based environment, not much setup was done to the default container. It is expected that the user will install plug ins as they need them.
