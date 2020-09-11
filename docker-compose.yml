@@ -30,8 +30,59 @@ services:
     networks:
       - sasbridge
 
+  an_python:
+    image: scoyote/pythonswat:latest
+    build:
+      context: ./python
+      dockerfile: Dockerfile-python
+    container_name: python-swat
+    volumes:
+      - /Users/samuelcroker/Documents/repositories:/repositories
+      - /Users/samuelcroker/SAS_Platform/shared:/shared
+    restart: unless-stopped
+    command: /bin/bash -c "jupyter notebook --allow-root --notebook-dir=/shared --ip='*' --port=8888 --no-browser --NotebookApp.token=''"
+    ports:
+      - 8888:8888
+    networks:
+      - sasbridge
+
+  an_r:
+    image: scoyote/rswat:latest    
+    build:
+      context: ./rocker
+      dockerfile: Dockerfile-rocker
+    container_name: r-swat
+    volumes:
+      - /Users/samuelcroker/Documents/repositories:/repositories
+      - /Users/samuelcroker/SAS_Platform/shared:/shared
+    restart: unless-stopped
+    ports:
+      - 8787:8787
+    networks:
+      - sasbridge
+
+  code-server:
+    image: linuxserver/code-server
+    container_name: code-server
+    environment:
+      - PUID=1100
+      - PGID=1100
+      - TZ=America/New_York
+      # - PASSWORD=password #optional
+      # - SUDO_PASSWORD=password #optional
+      # - PROXY_DOMAIN=code-server.my.domain #optional
+    volumes:
+      - /Users/samuelcroker/Documents/repositories:/repositories
+      - /Users/samuelcroker/SAS_Platform/vscode/config:/config
+      - /Users/samuelcroker/SAS_Platform/shared:/shared
+    ports:
+      - 8088:8443
+    restart: unless-stopped
+    networks:
+      - sasbridge
+
   adminer:
-    image: adminer
+    image: adminer:platform
     container_name: sas-adminer
     restart: always
     ports:
@@ -45,12 +96,10 @@ services:
     volumes:
       - /Users/samuelcroker/Documents/repositories:/repositories
       - /Users/samuelcroker/SASDepot/LINAMinINTTECH:/depot
+      - /Users/samuelcroker/SAS_Platform/shared:/shared
     ports:
       - 38080:38080
       - 8591:8591
-      - 50438:50438
-      - 50439:50439
-      - 50440:50440
       - 58591:58591
     command: "/home/sas/entrypoint.sh"
     networks:
