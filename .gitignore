@@ -13,4 +13,4 @@ vscode/
 *.tar
 *.gz
 .ipynb_checkpoints/
-R-swat-1.5.0-linux64.tar.gz
+.DS_Store
