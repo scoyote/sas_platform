@@ -1,0 +1,5 @@
+saspy
+notebook
+swat
+scikit-learn
+jupyterhub

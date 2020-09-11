@@ -1,0 +1,16 @@
+data_mysql/
+data_postgres/
+keys/
+vscode/
+*.svg
+*.jar
+*.class
+*.java
+*.csv
+*.pdf
+*.gif
+*.png
+*.tar
+*.gz
+.ipynb_checkpoints/
+R-swat-1.5.0-linux64.tar.gz

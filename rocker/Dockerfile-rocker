@@ -1,0 +1,6 @@
+FROM rocker/rstudio:latest
+
+COPY R-swat-1.5.0-linux64.tar.gz /
+RUN R -e 'install.packages(c("plumber","httr", "jsonlite", "dplyr", "stringr", "here"))'
+RUN R CMD INSTALL /R-swat-1.5.0-linux64.tar.gz
+EXPOSE 8787

@@ -1,0 +1,16 @@
+version: '2'
+
+services:
+
+    sas_cas:
+        image: registry.unx.sas.com/sacrok/minicas:latest
+        container_name: sas_minimal
+        # R use session <- CAS('sas-minimal',8778,'https',username='sas',password='Orion123')
+        command: cas
+        ports:
+        - "5571:5570"
+        - "8778:8777"
+        - "8591:8591"
+        volumes:
+        - ./remote_volumes/cas/data:/cas/data
+        restart: always

@@ -1,0 +1,19 @@
+58591 sim studio
+8de2a0330937
+8561 metadata
+5660
+8581 objspawn 8801 8811 8821
+8591 workspace svr
+8551 Share
+7551 Connect
+7541 Connect
+
+docker run -it  -v /Users/samuelcroker/Documents/repositories/:/repo \
+-v /Volumes/xfercard/LINA_SA4C/:/depot \
+-p 38080:38080 -p 8591:8591 -p 58591:58591 \
+--name sas-94ts1m7 sasprep:v0 /bin/bash
+
+
+mysql
+
+docker run --name some-mysql -v /my/own/datadir:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=5ang%fre -d mysql:tag

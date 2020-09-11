@@ -1,0 +1,1 @@
+This is a self contained folder. The mysql and postgres database are local... I need to work on this description some

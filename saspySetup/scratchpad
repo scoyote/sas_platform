@@ -1,0 +1,2 @@
+,
+            "javaparms": ["--add-modules=java.corba"]
