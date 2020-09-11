@@ -1,0 +1,5 @@
+FROM registry.unx.sas.com/sacrok/sas-94ts1m7:latest
+
+WORKDIR /shared
+COPY entrypoint_sas.sh /home/sas/
+EXPOSE 38080 8591 58591

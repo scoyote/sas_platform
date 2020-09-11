@@ -91,7 +91,10 @@ services:
       - sasbridge
 
   sas-94cp:
-    image: registry.unx.sas.com/sacrok/sas-94ts1m7:latest
+    image: sas-94:platform
+    build:
+      context: ./sas
+      dockerfile: Dockerfile-sas
     container_name: sas-94
     volumes:
       - /Users/samuelcroker/Documents/repositories:/repositories
