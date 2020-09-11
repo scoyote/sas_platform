@@ -82,7 +82,7 @@ services:
       - sasbridge
 
   adminer:
-    image: adminer:platform
+    image: adminer:latest
     container_name: sas-adminer
     restart: always
     ports:
