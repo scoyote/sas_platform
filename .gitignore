@@ -1,7 +1,7 @@
-data_mysql/
-data_postgres/
-keys/
-vscode/config/
+data_mysql/*
+data_postgres/*
+keys/*
+vscode/config/*
 *.svg
 *.jar
 *.class
