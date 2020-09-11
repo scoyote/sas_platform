@@ -7,4 +7,5 @@ ARG PW=Orion123
 RUN useradd -m ${USER} --uid=${UID} && echo "${USER}:${PW}" | chpasswd \
     && R -e 'install.packages(c("plumber","httr", "jsonlite", "dplyr", "stringr", "here"))' \
     && R CMD INSTALL R-swat-1.5.0-linux64.tar.gz
+    && apt-get install -y numactl
 EXPOSE 8787
