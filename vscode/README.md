@@ -1,0 +1,1 @@
+This folder will be populated by the Visual Studio Code but is not tracked other than placeholding. If you need to back up this folder in implementation, please do it using backup tools and not by turning on git tracking. The files generated are not conducive to git maintanence.
