@@ -1,5 +1,6 @@
 data_mysql/*
 data_postgres/*
+.vscode/*
 keys/*
 vscode/config/*
 *.svg
