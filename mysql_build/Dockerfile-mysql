@@ -1,0 +1,20 @@
+FROM scoyote/mysql:platform
+
+ENV MYSQL_ROOT_PASSWORD=Orion123
+
+COPY ./test_db /test_db/
+
+ARG USER=sas
+ARG UID=1141
+ARG GID=1141
+ARG PW=Orion123
+RUN apt-get update -y \
+    && apt-get install -y sudo git unzip \
+    && useradd -m ${USER} --uid=${UID} && echo "${USER}:${PW}" | chpasswd \
+    && usermod -aG sudo sas 
+
+# RUN git clone https://github.com/datacharmer/test_db.git 
+
+WORKDIR /test_db
+
+# RUN mysql -u root -p$MYSQL_ROOT_PASSWORD < employees.sql 
