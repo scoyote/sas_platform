@@ -3,7 +3,10 @@ version: '3.8'
 services:
 
   db_mysql:
-    image: scoyote/mysql:platform
+    image: mysql:platform
+    build:
+      context: ./mysql_build
+      dockerfile: Dockerfile-mysql
     container_name: sas-mysql
     volumes:
       - /Users/samuelcroker/SAS_Platform/data_mysql:/var/lib/mysql
@@ -13,11 +16,15 @@ services:
       - 3306:3306
     environment:
       MYSQL_ROOT_PASSWORD: Orion123   # mysql -u root -p
+      VIRTUAL_HOST: sasnet.mysql
     networks:
       - sasbridge
 
   db_pg:
-    image: scoyote/postgres:platform
+    image: postgres:platform
+    build:
+      context: ./postgres_build
+      dockerfile: Dockerfile-postgres
     container_name: sas-postgres
     volumes:
       - /Users/samuelcroker/SAS_Platform/data_postgres:/var/lib/postgresql/data/pgdata
@@ -27,6 +34,7 @@ services:
     environment:
       POSTGRES_PASSWORD: Orion123
       PGDATA: /var/lib/postgresql/data/pgdata
+      VIRTUAL_HOST: sasnet.postgres
     networks:
       - sasbridge
 
@@ -44,6 +52,8 @@ services:
     command: /bin/bash -c "jupyter notebook --allow-root --notebook-dir=/shared --ip='*' --port=8888 --no-browser --NotebookApp.token=''"
     ports:
       - 8888:8888
+    environment:
+      VIRTUAL_HOST: sasnet.pythonswat
     networks:
       - sasbridge
 
@@ -57,30 +67,32 @@ services:
       - /Users/samuelcroker/Documents/repositories:/repositories
       - /Users/samuelcroker/SAS_Platform/shared:/shared
     restart: unless-stopped
+    environment:
+      VIRTUAL_HOST: sasnet.rswat
     ports:
       - 8787:8787
     networks:
       - sasbridge
 
-  code-server:
-    image: linuxserver/code-server
-    container_name: code-server
-    environment:
-      - PUID=1100
-      - PGID=1100
-      - TZ=America/New_York
-       - PASSWORD=Orion123
-       - SUDO_PASSWORD=Orion123
-      #  - PROXY_DOMAIN=code-server.scoyotenet.local
-    volumes:
-      - /Users/samuelcroker/Documents/repositories:/repositories
-      - /Users/samuelcroker/SAS_Platform/vscode/config:/config
-      - /Users/samuelcroker/SAS_Platform/shared:/shared
-    ports:
-      - 8443:8443
-    restart: unless-stopped
-    networks:
-      - sasbridge
+  # code-server:
+  #   image: linuxserver/code-server
+  #   container_name: code-server
+  #   environment:
+  #     - PUID=1100
+  #     - PGID=1100
+  #     - TZ=America/New_York
+  #      - PASSWORD=Orion123
+  #      - SUDO_PASSWORD=Orion123
+  #     #  - PROXY_DOMAIN=code-server.scoyotenet.local
+  #   volumes:
+  #     - /Users/samuelcroker/Documents/repositories:/repositories
+  #     - /Users/samuelcroker/SAS_Platform/vscode/config:/config
+  #     - /Users/samuelcroker/SAS_Platform/shared:/shared
+  #   ports:
+  #     - 8443:8443
+  #   restart: unless-stopped
+  #   networks:
+  #     - sasbridge
 
   adminer:
     image: adminer:latest
@@ -88,6 +100,8 @@ services:
     restart: always
     ports:
       - 8080:8080
+    environment:
+      VIRTUAL_HOST: sasnet.adminer
     networks:
       - sasbridge
 
@@ -106,22 +120,41 @@ services:
       - 8591:8591
       - 58591:58591
     command: "/home/sas/entrypoint.sh"
+    environment:
+      VIRTUAL_HOST: sasnet.sas
     networks:
       - sasbridge
 
-  ut_reverse:
-    container_name: utility-reverse
-    hostname: sc_rev
-    image: nginx
-    ports:
-      - 80:80
-      - 443:443
-    volumes:
-      - /Users/samuelcroker/sas_platform/nginx/conf.d:/etc/nginx/conf.d
-      - /Users/samuelcroker/sas_platform/keys:/etc/ssl/private
-    networks:
-      - sasbridge
-    restart: always
+#   ut_reverse:
+#     container_name: utility-reverse
+#     hostname: sc_rev
+#     image: nginx
+#     ports:
+#       - 80:80
+#       - 443:443
+#     volumes:
+#       - /Users/samuelcroker/sas_platform/nginx/conf.d:/etc/nginx/conf.d
+#       - /Users/samuelcroker/sas_platform/keys:/etc/ssl/private
+#     networks:
+#       - sasbridge
+#     restart: always
+
+  # nginx-proxy:
+  #   image: jwilder/nginx-proxy
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - /var/run/docker.sock:/tmp/docker.sock:ro
+  #   networks:
+  #     - sasbridge
+
+  # whoami:
+  #   image: jwilder/whoami
+  #   environment:
+  #     - VIRTUAL_HOST=whoami.local
+  #   networks:
+  #     - sasbridge
+
 networks:
     sasbridge:
         driver: bridge
