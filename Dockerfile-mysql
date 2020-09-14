@@ -1,9 +1,0 @@
-from scoyote/mysql:platform
-ARG USER=sas
-ARG UID=1141
-ARG GID=1141
-ARG PW=Orion123
-RUN useradd -m ${USER} --uid=${UID} && echo "${USER}:${PW}" | chpasswd \
-    && apt-get install -y git unzip \
-    && git clone https://github.com/datacharmer/test_db.git
-    && mysql -u root < employees.sql

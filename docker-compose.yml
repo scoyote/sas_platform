@@ -39,7 +39,7 @@ services:
       - sasbridge
 
   an_python:
-    image: scoyote/pythonswat:latest
+    image: scoyote/pythonswat:platform
     build:
       context: ./python
       dockerfile: Dockerfile-python
@@ -58,7 +58,7 @@ services:
       - sasbridge
 
   an_r:
-    image: scoyote/rswat:latest    
+    image: scoyote/rswat:platform
     build:
       context: ./rocker
       dockerfile: Dockerfile-rocker
@@ -95,7 +95,10 @@ services:
   #     - sasbridge
 
   adminer:
-    image: adminer:latest
+    image: adminer:platform
+    build:
+      context: ./adminer
+      dockerfile: Dockerfile-adminer
     container_name: sas-adminer
     restart: always
     ports:
