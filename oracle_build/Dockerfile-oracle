@@ -1,0 +1,4 @@
+from oracleinanutshell/oracle-xe-11g
+
+
+expose 1521 5500

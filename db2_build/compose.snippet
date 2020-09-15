@@ -1,0 +1,18 @@
+  db_db2:
+    image: db2:platform
+    build:
+      context: ./db2_build
+      dockerfile: Dockerfile-db2
+    container_name: sas-db2
+    volumes:
+      - /Users/samuelcroker/SAS_Platform/data_db2:/database
+    restart: always
+    ports:
+      - 50000:50000
+    privileged: true
+    environment:
+      LICENSE: accept 
+      DB2INST1_PASSWORD: Orion123 
+      DBNAME: testdb
+    networks:
+      - sasbridge
