@@ -108,23 +108,52 @@ services:
     networks:
       - sasbridge
 
-  sas-94cp:
-    image: sas-94:platform
-    build:
-      context: ./sas
-      dockerfile: Dockerfile-sas
-    container_name: sas-94
+  # sas-94cp:
+  #   image: sas-94:platform
+  #   build:
+  #     context: ./sas
+  #     dockerfile: Dockerfile-sas
+  #   container_name: sas-94
+  #   volumes:
+  #     - /Users/samuelcroker/Documents/repositories:/repositories
+  #     - /Users/samuelcroker/SASDepot/LINAMinINTTECH:/depot
+  #     - /Users/samuelcroker/SAS_Platform/shared:/shared
+  #   ports:
+  #     - 38080:38080
+  #     - 8592:8591
+  #     - 58591:58591
+  #   command: "/home/sas/entrypoint.sh"
+  #   environment:
+  #     VIRTUAL_HOST: sasnet.sas
+  #   networks:
+  #     - sasbridge
+  sas-viya35:
+    image: registry.unx.sas.com/jaskal/viya35access:v2
+    container_name: sas-viya35PL
     volumes:
       - /Users/samuelcroker/Documents/repositories:/repositories
-      - /Users/samuelcroker/SASDepot/LINAMinINTTECH:/depot
-      - /Users/samuelcroker/SAS_Platform/shared:/shared
+      - /Users/samuelcroker/Documents/SAS_Viya35/sasinside:/sasinside
+      - /Users/samuelcroker/Documents/SAS_Viya35/sasdemo:/data
+      - /Users/samuelcroker/Documents/SAS_Viya35/cas/data:/cas/data
+      - /Users/samuelcroker/Documents/SAS_Viya35/cas/cache:/cas/cache
+      - /Users/samuelcroker/Documents/SAS_Viya35/cas/permstore:/cas/permstore
+      - /Users/samuelcroker/.ssh:/keys
     ports:
-      - 38080:38080
+      - 5570:5570
+      - 8777:8777
+      - 2323:2323
       - 8591:8591
-      - 58591:58591
-    command: "/home/sas/entrypoint.sh"
+      - 38081:38080
+      - 2144:2144
+      - 8561:8561
+      - 41415:41415
+      - 38667:38667
+      - 45745:45745
+      - 41203:41203
+      - 8081:80
+      - 8443:443
     environment:
-      VIRTUAL_HOST: sasnet.sas
+      VIRTUAL_HOST: sasnet.sasviya35PL
     networks:
       - sasbridge
 
