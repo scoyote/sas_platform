@@ -1,5 +1,23 @@
 FROM registry.unx.sas.com/sacrok/sas-94ts1m7:latest
 
-WORKDIR /shared
+RUN yum update -y \
+    && yum install -y ksh unzip wget \
+    && wget https://download.oracle.com/otn_software/linux/instantclient/19800/oracle-instantclient19.8-basic-19.8.0.0.0-1.x86_64.rpm \
+    && wget https://download.oracle.com/otn_software/linux/instantclient/19800/oracle-instantclient19.8-sqlplus-19.8.0.0.0-1.x86_64.rpm \
+    && wget https://download.oracle.com/otn_software/linux/instantclient/19800/oracle-instantclient19.8-devel-19.8.0.0.0-1.x86_64.rpm \
+    && yum localinstall -y oracle-instantclient19.8-basic-19.8.0.0.0-1.x86_64.rpm \
+    && yum localinstall -y oracle-instantclient19.8-devel-19.8.0.0.0-1.x86_64.rpm \
+    && yum localinstall -y oracle-instantclient19.8-sqlplus-19.8.0.0.0-1.x86_64.rpm  
+
 COPY entrypoint_sas.sh /home/sas/
+
+#ORACLE
+
+ENV ORACLE_BASE="/usr/lib/oracle"
+ENV ORACLE_HOME="/usr/lib/oracle/19.8/client64/lib"
+ENV ORACLE_VERSION="11.2.0"
+ENV LD_LIBRARY_PATH="/usr/lib/oracle/19.8/client64/lib"
+ENV PATH="/usr/lib/oracle/19.8/client64/lib:/usr/lib/oracle/19.8/client64/bin:${PATH}"
+
 EXPOSE 38080 8591 58591
+

@@ -1,0 +1,1781 @@
+#!/bin/sh
+#############################################################################
+#
+# Licensed Materials - Property of IBM
+#
+# "Restricted Materials of IBM" 
+#
+# (C) COPYRIGHT IBM Corp. 1993, 2020 All Rights Reserved.
+#
+# US Government Users Restricted Rights - Use, duplication or
+# disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
+#
+#############################################################################
+
+DB2VER_CURRENT=115
+CurVERSION=11
+CurRELEASE=5
+CurMODIFICATION=4
+CurFIXLEVEL=0
+CurINTERIM=0
+CurSpecialBuild=
+CurINSTALLP=0
+CurVRMFIS="${CurVERSION?}_${CurRELEASE?}_${CurMODIFICATION?}_${CurFIXLEVEL?}_${CurINTERIM?}_${CurINSTALLP?}"
+Cur_VRMFIS="${CurVERSION?}.${CurRELEASE?}.${CurMODIFICATION?}.${CurFIXLEVEL?}.${CurINTERIM?}.${CurINSTALLP?}"
+Cur_VRMF="${CurVERSION?}.${CurRELEASE?}.${CurMODIFICATION?}.${CurFIXLEVEL?}"
+
+#
+# NAME: installFixPack
+#
+# FUNCTION: installFixPack - Apply FixPack images on top of an installed 
+#                            DB2 location.
+#
+########################################################################
+# Options for "set" command
+setopts="${setopts:-+x}"
+set ${setopts?}
+
+TRUE=0                     # True variable
+FALSE=1                    # False variable
+export TRUE FALSE
+FIXPACK=${TRUE?} 
+ISDB2UPDATE=${FALSE?}
+FORCE_LEVEL=${FALSE?}
+PROGNAME=`basename $0` # Program name
+curdir=`/bin/pwd`
+if [ "X$DB2CURDIR" != "X" ]; then
+   TOPDIR=${DB2CURDIR?}
+else
+   TOPDIR=${curdir?}
+fi
+PROGDIR=`dirname $0`
+cd ${PROGDIR?}
+PROGDIR=`/bin/pwd`
+cd ${curdir?}
+
+#-----------------------------------------------------------------------#
+#               Start of function definitions
+#-----------------------------------------------------------------------#
+
+# To display the command syntax
+syntax ()
+{
+   #Needs to be corrected once MRI is done.
+    #display_msg ${DB2CAT?} 54 \
+   #"DBI1054I Usage: installFixPack -b <baseInstallPathOfDB2>  \
+                    #[-c <imagelocation >] ... [-f level|db2lib|install|update|NOTSAMP|precopy_db2_binary_only]  [-l <logFile>] \
+                    #[-t <traceFile>] [-n]  [-h | -?]"
+   echo "Invalid or incompatible argument is entered"
+   msgidx=41701 #starting message index
+   lastidx=41726 #one greater than last index
+
+   while [ ${msgidx?} -lt ${lastidx?} ]
+   do
+       display_msg ${DB2ISTR?} $msgidx \
+       "Failed to load the message\n"
+
+   msgidx=`expr ${msgidx?} + 1`
+   
+   done
+    exit 67
+}
+
+# To display help message
+helpmsg ()
+{
+   msgidx=41701 #starting message index
+   lastidx=41814 #one greater than last index
+
+   while [ ${msgidx?} -lt ${lastidx?} ]
+   do 
+       display_msg ${DB2ISTR?} $msgidx \
+       "Failed to load the message\n"
+   
+   msgidx=`expr ${msgidx?} + 1`
+     
+   done
+   exit 67
+}
+
+generate_response ()
+{
+  set ${setopts?}
+  if [ -f ${RSP_FILE?} ]; then
+     rm ${RSP_FILE?}
+     display_msg ${DB2CAT?} 83 "DBI1083E An attempt to remove %s failed.\n" \
+           ${RSP_FILE?}
+     exit 67
+  fi
+  
+  if [ "X${BASE_DIR?}" != "X" ]; then
+     echo "FILE=${BASE_DIR?}"                  > ${RSP_FILE?}
+  else
+     echo "FILE=${install_home?}"              > ${RSP_FILE?}
+  fi
+  echo "PROGRAM=${PROGNAME?}"               >> ${RSP_FILE?}
+  echo "BACKUP_BYPASS=${BACKUP_BYPASS?}"    >> ${RSP_FILE?}
+  for disk in ${PACKAGE_LOCATION?}; do
+      echo "PACKAGE_LOCATION=${disk?}"      >> ${RSP_FILE?}
+  done
+  if [ "X${FORCE_KEY?}" != "X" ]; then
+      echo "FIXPACK_OVERRIDE=${FORCE_KEY?}" >> ${RSP_FILE?}
+  fi
+
+  if [ ${BASE_PROMPT?} -eq ${TRUE?} ]; then
+     echo "INTERACTIVE=YES"                 >> ${RSP_FILE?}
+  else
+     echo "INTERACTIVE=NONE"                >> ${RSP_FILE?}
+  fi
+  if [ "X${INSTALL_TSAMP?}" != "X" ]; then
+      echo "INSTALL_TSAMP=${INSTALL_TSAMP?}" >> ${RSP_FILE?}
+  fi
+ 
+  if [ "X${HOSTS_FILE?}" != "X" ]; then
+      cat ${HOSTS_FILE?}                     >> ${RSP_FILE?}
+  fi
+
+}
+
+# Default initialization for command execution
+initialization ()
+{
+    set ${setopts?}
+    
+    install_home=""
+    install_user=""
+    SILENT=${TRUE?}
+    DEBUG=${FALSE?}
+    BACKUP_BYPASS="NO"
+    COPY_DB2_BINARY_ONLY=""
+    TSA_GPFS_ONLY="NO"
+    ACCEPT_LIC=${FALSE?}
+    LOCAL_FP=${FALSE?}
+    BASE_HAS_SD_COPY=${FALSE?}
+    BASE_HAS_SD_INST=${FALSE?}
+    BASE_DIR=""
+    FP_LOCATION=""
+    REMOTE_HOST=${FALSE?}
+    HOSTS_FILE=""
+    PACKAGE_LOCATION=""
+    FORCE_OPTIONS=""
+    BASE_PROMPT=0
+    TMPDIR=${DB2TMPDIR:-/tmp}
+    export TMPDIR
+    FORCE_KEY=""
+    FORCE_INSTALL=${FALSE?}
+    LOGFILE="${TMPDIR?}/${PROGNAME?}.log.$$" #default
+    TRCFILE="${TMPDIR?}/${PROGNAME?}.trc.$$" #default trace file 
+    INSTALLFIXPACK_EXEC="${TMPDIR?}/${PROGNAME?}_exec.$$"
+    INSTALLER_SOURCE="${PROGDIR?}"
+    TARDIR=${INSTALLER_SOURCE?}
+
+    WORK_USER=`${PROGDIR?}/../bin/db2usrinf -n -E`
+    WORK_DIR=`${PROGDIR?}/../bin/db2usrinf -d ${WORK_USER?}`
+    WORKDIR=${DB2WORKDIR:-${WORK_DIR?}}
+    RUNLOCATION=${WORKDIR?}/db2.tmp.$$
+
+    # RUNLOCATION=${TMPDIR?}/db2.tmp.$$
+    INSTALLER_TOP=${RUNLOCATION?}
+    INSTALLFIXPACK_OPTS=""
+    CMD_DB2IURE=db2iure
+    BINDIR=${INSTALLER_SOURCE?}/../bin
+    DISPMSGDIR=${BINDIR?}
+    CMD_DB2LANGDIR=${BINDIR?}/db2langdir
+    RSP_FILE=${RUNLOCATION?}/${PROGNAME?}_exec.$$.rsp
+    INSTALLER_TAR_NAME="silent.tar.gz"
+    INSTALLER_TAR=${INSTALLER_SOURCE?}/${INSTALLER_TAR_NAME?}
+    INSTALL_TSAMP=""
+    TRACE=${FALSE?}
+
+    if [ `${PROGDIR?}/../bin/db2usrinf -E` -ne 0 ]; then
+       TMP_USER=`${PROGDIR?}/../bin/db2usrinf -n -E`
+       LOGFILE=${TMPDIR?}/${PROGNAME?}_${TMP_USER?}.$$.log # default
+       TRCFILE=${TMPDIR?}/${PROGNAME?}_${TMP_USER?}.$$.trc # match with default log
+       INSTALLFIXPACK_EXEC="${WORKDIR?}/${PROGNAME?}_exec_${TMP_USER?}.$$"
+       RUNLOCATION=${WORKDIR?}/db2.tmp_${TMP_USER?}.$$
+       RSP_FILE=${RUNLOCATION?}/${PROGNAME?}_exec_${TMP_USER?}.$$.rsp
+       INSTALLER_TOP=${RUNLOCATION?}
+    fi
+
+    PATH=".:"${PATH}
+    export PATH
+    LIBPATH_ORG=${LIBPATH}
+    LIBPATH=.:${INSTALLER_SOURCE?}:${LIBPATH}
+    export LIBPATH
+    LD_LIBRARY_PATH_ORG=${LD_LIBRARY_PATH}
+    LD_LIBRARY_PATH=.:${INSTALLER_SOURCE?}:${LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH
+    SHLIB_PATH_ORG=${SHLIB_PATH}
+    SHLIB_PATH=.:${INSTALLER_SOURCE?}:${SHLIB_PATH}
+    export SHLIB_PATH
+ 
+    LANG_ORG=${LANG}
+    export LANG_ORG
+    setRootEnv ${PROGDIR?}/../bin
+    TRACTRAXLOG=${TRCFILE?}
+
+    set_lang
+}
+
+#-----------------------------------------------------------------------
+# Name       - find_free_space
+# Function   - returns the available space in bytes of the filesystem passed 
+#              as parameter
+# Parameters - $1 filesystem to check
+#
+#-----------------------------------------------------------------------
+find_free_space()
+{
+    set ${setopts?}
+
+    dirname2="$1"
+    free_space_in_fs=0
+
+    output_df=`df -k ${dirname2?} | tail -n 1 `
+
+    free_space_in_fs=`echo ${output_df?} | awk '{if ($4 !~ /%/) {print $4} else {print $3}}' `
+
+    return 0
+
+}
+
+#-----------------------------------------------------------------------
+# Name       - copy_install_local
+# Function   - copies the tar.gz installer files to /tmp
+# Parameters - none
+#-----------------------------------------------------------------------
+copy_install_local()
+{
+    set ${setopts?}
+     
+    if [ ! -d ${WORKDIR?} ]; then
+       display_msg ${DB2CAT?} 97 \
+           'The command failed because a file or directory  does not exist or is invalid. File or directory name:%s' ${WORKDIR?}
+       exit 4
+    fi
+
+    TMP_CHK=${DB2_SKIP_TMP_CHK:-"FALSE"}
+    if [ ${TMP_CHK?} != "TRUE" -a ${TMP_CHK?} != "true" ];then
+       echo ${WORKDIR?} | grep -w "\/tmp" 1> /dev/null
+       if [ $? -eq 0 ];then
+           display_msg ${DB2CAT?} 97 \
+           "The command failed because a file or directory  does not exist or is invalid. File or directory name:%s" ${WORKDIR?}
+           exit 67
+       fi
+    fi
+    silent_tar_file="silent.tar.gz"
+    gui_tar_file="gui.tar.gz"
+    silent_size=`gunzip -l ${TARDIR?}/${silent_tar_file?} | tail -n 1 | awk {'print $2'}`
+
+    required_space=`expr ${silent_size?}`
+    if [ ${SILENT?} -eq 1 ]; then
+        gui_size=`gunzip -l ${TARDIR?}/${gui_tar_file?} | tail -n 1 | awk {'print $2'}`
+        required_space=`expr ${required_space?} + ${gui_size?}`
+        # add padding for the common launchpad code added in cobra (1MB)
+        lpad_space=1024
+        # add 170MB for memory/swap space (usually only a problem on sun64)
+	swap_space=0
+        
+    fi
+
+    # convert required space to 1024k blocks
+    required_space=`expr ${required_space?} / 1024`
+
+    # Pad 2MB for log files
+    required_space=`expr ${required_space?} + 2048`
+    
+    if [ ${SILENT?} -eq 1 ]; then
+        required_space=`expr ${required_space?} + ${lpad_space?} + ${swap_space?}`
+    else
+        required_space=`expr ${required_space?}`
+    fi
+
+    # Pad 20MB for trace files if required
+    if [ ${TRACE?} -eq 0 ]; then
+        required_space=`expr ${required_space?} + 20480`
+    fi
+    
+    # Over-riding the calculated required space (not accurate) with a hardcoded 500 MB (wsdbu00577652)
+    # w1226473mk update it to 2 GB
+    # checked has moved to ure code. So dont check it here w1269874myk
+    # required_space=2000000  
+
+    find_free_space ${WORKDIR?}
+    
+    if [ ${required_space} -gt ${free_space_in_fs?} -a ${TMP_FREE_SPACE_CHK:-${TRUE?}} -eq ${TRUE?} ]; then
+        display_msg ${DB2CAT?} 5005 \
+            "Disk space needed = %s KB  Available = %s KB\n" \
+                ${required_space?} ${free_space_in_fs?}
+        display_msg ${DB2CAT?} 80 \
+            "DBI1080E Disk full.\n" \
+                ${WORKDIR?} ${required_space?} ${free_space_in_fs?}
+        exit 67
+    else
+        mkdir ${RUNLOCATION?}
+        cd ${RUNLOCATION?}
+        gunzip -c ${TARDIR?}/${silent_tar_file?} | tar xf -
+        # copy lic file 
+        cp -r ${TARDIR?}/../../license/ ${RUNLOCATION?}/db2/
+        # copy the spec file
+        cp ${TARDIR?}/../../spec ${RUNLOCATION?}/db2/
+        # copy .<prod> files
+        cp ${TARDIR?}/../../.[a-zA-Z]* ${RUNLOCATION?}/db2/
+        if [ ${SILENT?} -eq 1 ]; then
+            gunzip -c ${TARDIR?}/${gui_tar_file?} | tar xf -
+            # The ${TARDIR?}/../../../doc doesn't exist - wsdbu00888724
+            #cp -r ${TARDIR?}/../../../doc/ ${RUNLOCATION?}/
+        fi
+
+        RUNLOCATION="${RUNLOCATION?}/db2/linux/install/"
+        # copy .fsinfo
+        cp ${TARDIR?}/.fsinfo ${RUNLOCATION?}/.fsinfo
+        
+    ## show a loading graphic before we run time intensive operations
+    if [ ${SILENT?} -eq 1 ]; then
+        TMPFILE_NAME=${TMPDIR?}/db2load.tmp
+        export TMPFILE_NAME
+        ${RUNLOCATION?}../java/jre/bin/java -jar ${RUNLOCATION?}../../common/install.jar ${TMPFILE_NAME?} &
+    fi
+
+        #Update embedded runtime path
+        if [ -f ${RUNLOCATION?}/db2chgpath ]; then
+           ${RUNLOCATION?}/db2chgpath 1>/dev/null
+        fi
+    fi
+    
+    # copy .fsinfo and .<prod> files 
+
+}
+
+# Reset the related LIB path to the original ones
+reset_path ()
+{
+    set ${setopts?}
+
+    if [ "X$LIBPATH_ORG" = "X" ]; then
+      unset LIBPATH
+    else
+      LIBPATH=${LIBPATH_ORG?}
+      export LIBPATH
+    fi
+    if [ "X$LD_LIBRARY_PATH_ORG" = "X" ]; then
+      unset LD_LIBRARY_PATH
+    else
+      LD_LIBRARY_PATH=${LD_LIBRARY_PATH_ORG?}
+      export LD_LIBRARY_PATH
+    fi
+    if [ "X$LD_LIBRARY_PATH_64_ORG" = "X" ]; then
+      unset LD_LIBRARY_PATH_64
+    else
+      LD_LIBRARY_PATH_64=${LD_LIBRARY_PATH_64_ORG?}
+      export LD_LIBRARY_PATH_64
+    fi
+    if [ "X$SHLIB_PATH_ORG" = "X" ]; then
+      unset SHLIB_PATH
+    else
+      SHLIB_PATH=${SHLIB_PATH_ORG?}
+      export SHLIB_PATH
+    fi
+}
+
+# Check if absolute path is given
+chk_abs_path ()
+{
+   set ${setopts?}
+   file_path=$1
+   echo ${file_path?} | grep '^/' 2>&1 1>/dev/null
+   return $?
+}
+
+# Check if copy owner is running the prog
+chk_copy_owner ()
+{
+    set ${setopts?}
+
+    if [ $# -ne 1 ]; then
+       echo "Usage chk_copy_owner <install path>"
+       exit 67
+    fi
+    tmp_install_path=$1
+    tmp_bin_dir="${tmp_install_path?}/bin"
+    if [ -f "${tmp_install_path?}/doc/bin/db2usrinf" ]; then
+       tmp_bin_dir="${tmp_install_path?}/doc/bin"
+    fi
+    if [ -f ${tmp_bin_dir?}/db2usrinf ]; then
+      tmp_runner=`${tmp_bin_dir?}/db2usrinf -n -E`
+    else
+      display_msg ${DB2CAT?} 95 \
+          "DBI1095W  The file or directory %s cannot be found." ${tmp_bin_dir?}/db2usrinf
+      exit 67
+    fi
+
+    find ${tmp_bin_dir?} -user ${tmp_runner?} -name db2usrinf | grep db2usrinf 1>/dev/null 2>/dev/null
+    tmp_rc=$?
+    if [ ${tmp_rc?} -ne 0 ]; then
+        if [ `${tmp_bin_dir?}/db2usrinf -E` -eq 0 ]; then
+           find ${tmp_bin_dir?} -user bin -name db2usrinf | grep db2usrinf 1>/dev/null 2>/dev/null
+           tmp_rc=$?
+        fi
+        if [ ${tmp_rc?} -ne 0 ]; then
+           display_msg ${DB2CAT?} 149 \
+               'DBI1149E You have to be the owner of the install copy to execute this program.'
+           exit 67
+        fi
+    fi
+}
+
+# Stop or disable  DB2 ACS services
+#-----------------------------------------------------------------------
+# Name       - db2_acs_stop_disable
+# Function   - Stop or disable DB2 ACS services
+# Parameters - $1: the instance name
+#              $2: the actions - 'stop' or 'disable'
+#              $3: the DB2DIR related to the DB2 instance
+#              $4: the program name calling this function
+# Returns    - 0 for success
+#              Non Zero for failure
+#-----------------------------------------------------------------------
+db2_acs_stop_disable ()
+{
+    setopts="${setopts:-+x}"
+    TRUE="${TRUE:-0}"
+    FALSE="${FALSE:-1}"
+    DEBUG="${DEBUG:-${FALSE?}}"
+    set ${setopts?}
+    instancename=$1
+    action=$2
+    acs_db2dir=$3
+    acs_caller=$4
+    db2_acs_stop_disable_rc=0;
+    query_rc=0;
+    TMPDIR=${DB2TMPDIR:-/tmp}
+
+    acs_tmp_log=${TMPDIR?}/db2_acs_stop_disable_${instancename?}.$$
+    if [ -f ${acs_tmp_log?} ]; then
+       rm -f ${acs_tmp_log?} 2>/dev/null
+    fi
+
+    if [ "X${instancename?}" = "X" -o \
+         $# -ne 4 -o \
+         "X${action?}" != "Xstop" -a \
+         "X${action?}" != "Xdisable" ]; then
+       echo "ERROR: Usage db2_acs_stop_disable <instance name> 'stop!disable' <DB2IPRDDIR>"
+       exit 67
+    fi
+
+    insthome=`${acs_db2dir?}/bin/db2usrinf -d ${instancename?}`
+    instpgrp=`${acs_db2dir?}/bin/db2usrinf -g ${instancename?}`
+
+    if [ ! -f ${insthome?}/sqllib/acs/setup_db2.sh -o ! -f ${acs_db2dir?}/acs/setup_db2.sh ]; then
+       return ${TRUE?}
+    fi
+
+    ${acs_db2dir?}/acs/setup_db2.sh -a query  -d ${insthome?}/sqllib \
+          -u ${instancename?} -g ${instpgrp?} 2>/dev/null 1>/dev/null
+    if [ $? -ne ${TRUE?} ]; then
+       return ${TRUE?}
+    fi
+ 
+    ${acs_db2dir?}/acs/setup_db2.sh -a ${action?} -d ${insthome?}/sqllib \
+               -u ${instancename?} -g ${instpgrp?} 2>&1 > ${acs_tmp_log?}
+    db2_acs_stop_disable_rc=$?
+
+    if [ ${db2_acs_stop_disable_rc?} -eq ${TRUE?}  \
+         -a ${DEBUG?} -ne ${TRUE?} ]; then
+       rm -f ${acs_tmp_log?} 2>/dev/null
+    fi
+    return ${db2_acs_stop_disable_rc?}
+}
+
+#Set instance environment for non-root installers
+set_nr_instance_env ()
+{
+    set ${setopts?}
+
+    if [ $# -ne 1 ]; then
+       echo "Usage set_nr_instance_env <full path of db2usrinf>"
+       exit 67
+    fi
+    db2usrinf_cmd=$1
+    if [ ! -f "${db2usrinf_cmd?}" ]; then
+       echo "Usage set_nr_instance_env <full path of db2usrinf>"
+       exit 67
+    fi
+
+    install_user=`${db2usrinf_cmd?} -n -E`
+    install_home=`${db2usrinf_cmd?} -d ${install_user?}`
+
+    if [ "X${install_user?}" = "X" ]; then
+      display_msg ${DB2CAT?} 131 \
+          "DBI1131E The user ID %s is invalid.\n" ${install_user?}
+      exit 67
+    fi
+    if [ ! -d "${install_home?}" ]; then
+      display_msg ${DB2CAT?} 95\
+          "DBI1095W The file or directory %s cannot be found.\n" ${install_home?}
+      exit 67
+    fi
+
+    cd ${install_home?}
+    install_home=`/bin/pwd`
+    install_home="${install_home?}/sqllib"
+
+    if [ -d "${install_home?}/.metadata" -a -f "${install_home?}/db2profile" ]; then
+          . ${install_home?}/db2profile
+    fi
+}
+
+# validates the hosts list file 
+chk_hosts_file ()
+{
+    set ${setopts?}
+    
+    tmpfile="/tmp/tmpabc"
+    file=$1
+
+    # test exist and readble.
+    if [ ! -r "${file?}" ]; then
+        display_msg ${DB2CAT?} 408 "DBI1408N  The file %s could not be opened." ${file?}
+        exit 60
+    fi
+    
+    rm -rf ${tmpfile?}
+    
+    #remove empty lines
+    sed '/^[ \t]*$/d' ${file?} > ${tmpfile?}
+    #replace all tab with space
+    sed 's/\t/ /g' ${tmpfile?} 2>&1 1>/dev/null
+
+    #count line #
+    ln=`cat ${tmpfile?} | wc -l`
+    if [ $? -ne 0 -o ${ln?} -lt 1 ]
+    then
+       #echo "is not a validated hosts list file"
+       return 65
+    fi
+
+    #get host keywords lines
+    hosts=`grep '^[ \t]*HOST[ \t]*=[ \t]*[a-zA-Z0-9][a-zA-Z0-9\-\.]*[ \t]*$' ${tmpfile?} | cut -d'=' -f2 | sed 's/^[ \t]*//;s/[ \t]*$//'`
+    if [ "X${hosts?}" = "X" ] 
+    then
+        #echo "cann't find host keyword"
+        return 67
+    fi
+
+    for host in ${hosts?}
+    do
+        #echo "checking ###$host####"
+        if [ "X${host?}" = "X" ]
+        then
+            #echo "something wrong here"
+            return  68
+        else 
+            #if not empty subtract one line
+            ln=`expr ${ln?} - 1`
+        fi
+
+        #search .hostname keyword
+        grep "[ \t]*${host?}.HOSTNAME[ \t]*="   ${tmpfile?} 2>&1 1>/dev/null
+        if [ $? -ne 0 ]
+        then
+            #echo "can not find .hostname keyword"
+            return 80
+        else
+            ln=`expr ${ln?} - 1`
+        fi
+    done
+
+    #if the rest $ln > 0 means has non related keywords or garbage
+    if [ ${ln?} -gt 0 ] 
+    then
+        #echo "not a validated keyword"
+        #echo "includes non-validated keywords"
+        return 85
+    else
+        return 0
+   fi
+}
+ 
+chk_file_creation ()
+{
+    set ${setopts?}
+    file_chk=$1
+    touch ${file_chk?} 2>/dev/null 1>/dev/null
+    if [ $? -ne 0 ]; then
+       display_msg ${DB2CAT?} 503 'An error was encountered when opening or writing to file,%s.' ${file_chk?}
+       echo ""
+       exit 67
+    fi
+}
+
+# This function queries the current .instuse to find a string
+query_instuse_string()
+{
+    trac query_instuse_string $@
+    set ${setopts?}
+
+    INST2QUERY="$1"
+    DB2FTN="$2"
+    DEFAULT="$3"
+    BYDAS="$4"
+
+    CMD_DB2FUPDT=${DB2DIR?}/bin/db2fupdt
+    find_homedir ${INST2QUERY?}
+    INSTUSE=${USERHOME?}/sqllib/.instuse
+    if [ "X${BYDAS?}" = "Xdas" ]; then
+        INSTUSE=${USERHOME?}/das/ctrl/.instuse
+    fi
+
+    if [ ! -f ${INSTUSE?} ] && [ -f ${USERHOME?}/sqllib/ctrl/.instuse ]
+    then
+        db2_inst_ver=`${DB2DIR?}/bin/db2fupdt -f ${USERHOME?}/sqllib/ctrl/.instuse -p INSTVER`
+        if [ ${db2_inst_ver?} -le ${DB2VER_V97?} ]
+        then
+            INSTUSE="${USERHOME?}/sqllib/ctrl/.instuse"
+        fi
+    fi
+
+    INSTUSE_VALUE=`${CMD_DB2FUPDT?} -f ${INSTUSE?} -p ${DB2FTN?}`
+    rc=$?
+
+    # if no output (error), assume default.
+    if [ ${rc?} -ne 0 ]
+    then
+        INSTUSE_VALUE="${DEFAULT?}"
+    fi
+    trax query_instuse_string
+    return ${rc?}
+}
+
+# Find the home dir for given user ID. Set environment variable USERHOME
+find_homedir ()
+{
+    trac find_homedir $@
+    set ${setopts?}
+
+    username=$1
+
+    # is the user valid?
+    if ${DB2DIR?}/bin/db2usrinf -q ${username?}
+    then
+        USERHOME=`${DB2DIR?}/bin/db2usrinf -d ${username?}`
+    else
+        display_msg ${DB2CAT?} 131 \
+            'DBI1131E The user ID %s is invalid.' ${username?}
+        exit 1
+    fi
+
+    trax find_homedir
+    return 0
+}
+
+# Check if user is doing a downgrade, if yes, is it allowed?
+# Copies that have no instances can always be downgraded. 
+# Copies that have an instance require checking that it's allowed
+_if_downgrading_is_it_allowed ()
+{
+
+    if [ -x "${BASE_DIR?}/bin/db2ilist" ]; then
+
+      INSTNAME=`${BASE_DIR?}/bin/db2ilist | head -n 1`
+      DB2DIR=${BASE_DIR?}
+      if [ -n "${INSTNAME?}" ]; then
+         INSTHOME=`${PROGDIR?}/../bin/db2usrinf -d ${INSTNAME?}`
+
+         if chk_vrmfis ${INSTNAME?}; then
+             if chk_downgrade ${INSTNAME?}; then
+                if [ ${FORCE_LEVEL?} -ne ${TRUE?} ]; then
+                    display_msg ${DB2CAT?} 177 \
+                    'DBI1177W Updating to code at a lower level - Force this update with -D flag.\n'
+                    exit 1
+                fi
+             fi
+         fi
+
+       fi
+    fi
+}
+
+has_cf_copy ()
+{
+   setopts=${setopts:-+x}
+   set ${setopts?}
+
+   has_cf_copy_rc=${FALSE?}
+   if [ -d ${DB2DIR?}/.metadata/CF ]
+   then
+      has_cf_copy_rc=${TRUE?}
+   else
+      has_cf_copy_rc=${FALSE?}
+   fi
+   return ${has_cf_copy_rc?}
+}
+
+# Check if the instance to be updated has the level higher than the level
+# of the current installation.
+chk_vrmfis ()
+{
+  set ${setopts?}
+  instname=$1
+  bydas="$2"
+  query_instuse_string ${instname?} "V" ${CurVERSION?} "${bydas?}"
+  INST_V="${INSTUSE_VALUE?}"
+  query_instuse_string ${instname?} "R" ${CurRELEASE?} "${bydas?}"
+  INST_R="${INSTUSE_VALUE?}"
+  query_instuse_string ${instname?} "M" ${CurMODIFICATION?} "${bydas?}"
+  INST_M="${INSTUSE_VALUE?}"
+  query_instuse_string ${instname?} "F" ${CurFIXLEVEL?} "${bydas?}"
+  INST_F="${INSTUSE_VALUE?}"
+  query_instuse_string ${instname?} "I" ${CurINTERIM?} "${bydas?}"
+  INST_I="${INSTUSE_VALUE?}"
+  query_instuse_string ${instname?} "S" ${CurINSTALLP?} "${bydas?}"
+  INST_S="${INSTUSE_VALUE?}"
+
+  if [ "${INST_V?}" = "ZZ" -o ${INST_V?} -ne ${CurVERSION?} ]; then
+     display_msg ${DB2CAT?} 122 \
+         'DBI1122E Instance %s cannot be updated.\n' ${instname?}
+     exit 122 
+  elif [ ${INST_R?} -gt ${CurRELEASE?} ]; then
+     return ${TRUE?}
+  elif [ ${INST_R?} -lt ${CurRELEASE?} ]; then 
+     return ${FALSE?}
+  elif [ ${INST_M?} -gt ${CurMODIFICATION?} ]; then
+     return ${TRUE?}
+  elif [ ${INST_M?} -lt ${CurMODIFICATION?} ]; then
+     return ${FALSE?}
+  elif [ ${INST_F?} -gt ${CurFIXLEVEL?} ]; then
+     return ${TRUE?}
+  elif [ ${INST_F?} -lt ${CurFIXLEVEL?} ]; then
+     return ${FALSE?}
+  elif [ ${INST_I?} -gt ${CurINTERIM?} ]; then
+     return ${TRUE?}
+  elif [ ${INST_I?} -lt ${CurINTERIM?} ]; then
+     return ${FALSE?}
+  elif [ ${INST_S?} -gt ${CurINSTALLP?} ]; then
+     return ${TRUE?}
+  elif [ ${INST_S?} -le ${CurINSTALLP?} ]; then
+     return ${FALSE?}
+  else
+     return ${TRUE?}
+  fi
+}
+
+## check if we can downgrade from the current level.
+chk_downgrade ()
+{
+  set ${setopts?}
+  instname=$1
+
+  if [ -x ${INSTHOME?}/sqllib/bin/db2ickdown ]
+  then
+     ${INSTHOME?}/sqllib/bin/db2ickdown -check-all-instances \
+            -v ${CurVERSION?}      \
+            -r ${CurRELEASE?}      \
+            -m ${CurMODIFICATION?} \
+            -f ${CurFIXLEVEL?}     \
+            -i ${CurINTERIM?}      \
+            -s ${CurINSTALLP?}
+
+      if [ $? -ne ${TRUE?} ]
+      then
+          display_msg ${DB2ISTR?} 7097 "Downgrade to \"%1\" from the current level \"%2\" is not supported." | \
+            sed -e "s/%1/${Cur_VRMFIS}/" -e "s/%2/${INST_V?}.${INST_R?}.${INST_M?}.${INST_F?}.${INST_I?}.${INST_S?}/"
+          exit ${FALSE?}
+    fi
+  fi
+
+  return ${TRUE?}
+}
+
+sh_which_ ()
+{
+    set ${setopts?}
+
+    file=$1
+    search_path=$2
+    if [ -z "${search_path?}" ]
+    then
+      search_path="$PATH"
+    fi
+    echo ${search_path?} | sed -e 's/:/\
+/g' | while read path; do
+    if [ -x "${path?}/${file?}" ]
+    then
+        echo "${path?}/${file?}"
+        return 0
+    fi
+    done
+}
+
+sh_which ()
+{
+    set ${setopts?}
+    text=`sh_which_ "$@"`
+    # set return code based on whether there is any output.
+    if [ -z "${text?}" ]
+    then
+        return 1
+    else
+        echo "${text?}"
+        return 0
+    fi
+}
+
+TRUE=0
+FALSE=1
+
+if [ -z "${TRACTRAXLOG}" ]; then
+    _trace_tee ()
+    {
+      cat
+    }
+else
+    _trace_tee ()
+    {
+      tee -a ${TRACTRAXLOG}
+    }
+fi
+
+# To display a message when a function is called
+trac ()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## Entering: $*" >&2 | _trace_tee
+    fi
+}
+
+# To display a message when exiting a function
+trax()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## Exiting: $*"  >&2 | _trace_tee
+    fi
+}
+
+# To display a message when "debug" is set
+dmsg ()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## $*"  >&2 | _trace_tee
+    fi
+}
+
+#-----------------------------------------------------------------------
+# Name       - display_msg
+# Function   - Displays a message from the message catalog
+# Parameters - $1 - name of the message catalog
+#            - $2 - message number
+#            - $3 - default message string
+#            - $4,$5,$6 - arguments to substitute in msg string, if needed
+#-----------------------------------------------------------------------
+display_msg()
+{
+    set ${setopts?}
+
+    unset catname msgid deftmsg msgstr warnmsg infomsg
+    catname="$1"
+    msgid=$2
+    deftmsg="$3"
+    warnmsg=${FALSE?}
+    infomsg=${FALSE?}
+
+    echo ${deftmsg?} | grep "DBI....W" 1>/dev/null 2>/dev/null
+    if [ $? -eq 0 ]; then
+        warnmsg=${TRUE?}
+    fi
+
+    echo ${deftmsg?} | grep "DBI....I" 1>/dev/null 2>/dev/null
+    if [ $? -eq 0 ]; then
+        infomsg=${TRUE?}
+    fi
+
+    # Do not display message if NODISPLAY is set
+    if [ -z "${NODISPLAY}" ]; then
+        NODISPLAY=${FALSE?}
+    fi
+
+    if [ ${NODISPLAY?} -eq ${TRUE?} ]; then
+        return ${TRUE?}
+    fi
+
+    # Increment the message count only if it is not a warning or information
+    if [ ${warnmsg?} -eq ${FALSE?} -a ${infomsg?} -eq ${FALSE?} ]; then
+
+        # if MSGCOUNT isn't set, we'll just get 1, hence don't use the ? check. 
+        MSGCOUNT=`expr "${MSGCOUNT:-0}" + 1`
+    fi
+
+    shift ; shift ; shift
+
+    disp_msg_file=`sh_which disp_msg \
+         ${DISPMSGDIR:=${DB2DIR}}:${DISPMSGDIR?}/instance:${DISPMSGDIR?}/bin:${DISPMSGDIR?}/..`
+ 
+   sh_which_rc=$?
+ 
+    if [ -z "${DISPMSGLOG}" ]; then
+        dispmsg_tee_cmd="cat"
+    else
+        dispmsg_tee_cmd="tee -a ${DISPMSGLOG}"
+    fi
+
+    if [ ${sh_which_rc?} -eq 0 ]; then
+        ${disp_msg_file?} 1 ${msgid} ${catname} "${deftmsg}" "$@" 2>&1 | ${dispmsg_tee_cmd?}
+    else
+        echo "disp_msg does not exist"
+    fi
+
+}
+TMPDIR=${DB2TMPDIR:-/tmp}
+FORCE_INSTALL=${FALSE?}
+REQ_MET=${TRUE?}
+
+#----------------------------------------------------------------
+# Name       - abort_install_sysreq
+# Function   - Prints the url of the DB2 support web site for
+#              system requirements. 
+#            - Exits installation if there is no -f used in install
+#              scripts or force installation is not allowed. 
+# Parameters - $1 : Optional, any value means that force installation
+#                   is not allowed.
+# Returns    - 0 : Installation can continue
+# Exits      - Installation has to abort with return value 67.
+#----------------------------------------------------------------
+abort_install_sysreq ()
+{
+   setopts="${setopts:-+x}"
+   set ${setopts?}
+   disable_force=$1
+   if [ "X${disable_force?}" != "X" ]; then
+      display_sysreq_web
+   fi
+   if [ ${FORCE_INSTALL?} -ne ${TRUE?} ]; then
+      echo "  Aborting the current installation ..."
+   fi
+   if [ ${FORCE_INSTALL?} -ne ${TRUE?} -a "X${disable_force?}" = "X" ]; then
+      echo "  Run installation with the option \"-f sysreq\" parameter to force the installation."
+   fi
+   if [ ${FORCE_INSTALL?} -ne ${TRUE?} -o "X${disable_force?}" != "X" ]; then
+      exit 67
+   fi
+   return 0
+}
+#----------------------------------------------------------------
+# Name       - chk_sysreq
+# Function   - Check if the current system meets the basic system
+#              requiremes needed by DB2 Version 11.5
+# Parameters - none
+# Returns    - 0 : if the system is ok with the requirements
+#                  or FORCE_INSTALL is applicable
+#              67: otherwise
+#----------------------------------------------------------------
+chk_sysreq ()
+{
+   set ${setopts:-+x}
+   RC=0
+   curr_dir=`/bin/pwd`
+
+   BINDIR=`dirname ${PROGDIR?}`/bin
+   PREREQ_LOGFILE="${TMPDIR?}/db2prereqcheck.log.$$"
+   # this is checked prior to parsing the commandline, so we can't
+   # rely on -d or -t for tracing - instead, we rely on setopts.
+   debug=""
+   case "${setopts}" in
+     *-x*) debug="-d" ;;
+   esac
+
+   cd ${BINDIR?}
+   ./db2prereqcheck -i -l  -o ${PREREQ_LOGFILE?} ${debug?} > /dev/null
+   if [ $? -ne 0 ]
+   then
+       REQ_MET=${FALSE?}
+   fi
+   cd ${curr_dir?}
+}
+
+#----------------------------------------------------------------
+# Name       - chk_sysreq_act
+# Function   - Check if the current system meets the basic system
+#              requiremes needed by DB2 Application Cluster feature
+# Parameters - none
+# Returns    - 0 : if the system is ok with the requirements
+#                  or FORCE_INSTALL is applicable
+#              67: otherwise
+#----------------------------------------------------------------
+chk_sysreq_act ()
+{
+   set ${setopts:-+x}
+   RC=0
+   curr_dir=`/bin/pwd`
+
+   BINDIR=`dirname ${PROGDIR?}`/bin
+   PREREQ_LOGFILE="${TMPDIR?}/db2prereqcheck.log.$$"
+   # this is checked prior to parsing the commandline, so we can't
+   # rely on -d or -t for tracing - instead, we rely on setopts.
+   debug=""
+   case "${setopts}" in
+     *-x*) debug="-d" ;;
+   esac
+
+   cd  ${BINDIR?}
+    ./db2prereqcheck -l -i -n  -o ${PREREQ_LOGFILE?} ${debug?} > /dev/null
+   if [ $? -ne 0 ]
+   then
+       REQ_MET=${FALSE?}
+   fi
+   cd ${curr_dir?}
+}
+
+#----------------------------------------------------------------
+# Name       - chk_sysreq_post
+# Function   - follows the checking done by chk_sysreq to check
+#              if force installation is enabled.
+# Parameters - none
+# Returns    - not applicable
+#----------------------------------------------------------------
+
+chk_sysreq_post ()
+{
+   setopts="${setopts:-+x}"
+   set ${setopts?}
+   if [ ${REQ_MET?} -ne ${TRUE?} ]; then
+      abort_install_sysreq
+   fi
+   if [ ${FORCE_INSTALL?} -eq ${TRUE?} ]; then
+     echo "  The force option \"-f sysreq\" is used to force the installation ..."
+     echo
+   fi
+}
+
+#----------------------------------------------------------------
+# Name       - chk_oslevel
+# Function   - Checks if the OS level is supported. Refer wsdbu00912068
+# Parameters - none
+# Returns    - not applicable
+#----------------------------------------------------------------
+
+chk_oslevel ()
+{
+# Variable for OS Checking
+   OSMATCH=1
+   BINDIR=`/usr/bin/dirname ${PROGDIR?}`/bin
+   PREREQ_LOGFILE="${TMPDIR?}/db2prereqcheck.log.$$"
+# Retrieve the OS level using 'uname' command
+   if [ -x /usr/bin/uname ]; then
+      CMD_UNAME=/usr/bin/uname
+   elif [ -x /bin/uname ]; then
+      CMD_UNAME=/bin/uname
+   fi
+
+# If current OS is AIX, check if its version is 6.1 or above.
+# If AIX OS < 6.1, abort with error message
+   if [ `${CMD_UNAME?}` = "AIX" ]; then
+      if [ `${CMD_UNAME?} -a | cut -d " " -f 4` -lt 6 ] ; then
+         OSMATCH=0 ;
+      fi
+   fi
+
+#SUN Solaris
+   if [ `${CMD_UNAME?}` = "SunOS" ]; then
+      if [ `${CMD_UNAME?} -a | cut -d " " -f 3 | cut -d "." -f 1` -lt 5 ] ; then
+         OSMATCH=0 ;
+      fi
+      if [ `${CMD_UNAME?} -a | cut -d " " -f 3 | cut -d "." -f 2` -lt 9 ] ; then
+         OSMATCH=0 ;
+      fi
+   fi
+
+#HPUX
+   if [ `${CMD_UNAME?}` = "HP-UX" ]; then
+      if [ `${CMD_UNAME?} -a | cut -d " " -f 3 | cut -d "." -f 2` -lt 11 ] ; then
+         OSMATCH=0 ;
+      fi
+      if [ `${CMD_UNAME?} -a | cut -d " " -f 3 | cut -d "." -f 3` -lt 23 ] ; then
+         OSMATCH=0 ;
+      fi
+   fi
+
+# Print error message if the current OS does not match with minimum requirement.
+# re-using the db2prereqcheck message as we had crossed MRI cutoff. Please have a new message in the next release. 
+   if [ ${OSMATCH} -eq 0 ]; then
+      cd ${BINDIR?}
+      ./db2prereqcheck -l -i  -o ${PREREQ_LOGFILE?} 
+      exit 67
+   fi
+}
+
+set_lang_internal ()
+{
+    set ${setopts?}
+    bindir="$1"
+    msgdir="$2"
+    lang="$3"
+
+    CMD_DB2LANGDIR="${bindir?}/db2langdir"
+
+    if [ "X$lang" != "X" ]; then
+       LANG_CUSTOM=0
+    else
+       LANG_CUSTOM=1
+    fi
+    # Default locale name and locale-specific message directory
+    
+    LANG=${LANG:-C}
+    locname=${LANG?}
+    
+    if [ ${LANG_CUSTOM?} -eq 0 ]; then
+       locname=`${CMD_DB2LANGDIR?} ${lang?} -locale`
+       DB2_LANG_JAVA=${locname?}
+    fi
+
+    langdir=`${CMD_DB2LANGDIR?} ${locname?}`
+    clangdir=`${CMD_DB2LANGDIR?} C`
+
+    if [ -f ${msgdir?}/${langdir?}/db2install.cat -a -f ${msgdir?}/${langdir?}/db2istring.cat ]; then
+        DB2CAT="${msgdir?}/${langdir?}/db2install.cat"
+        DB2ISTR="${msgdir?}/${langdir?}/db2istring.cat"
+        LANGUAGEDIR=${langdir?}
+    elif [ -f ${msgdir?}/${clangdir?}/db2install.cat -a -f ${msgdir?}/${clangdir?}/db2istring.cat ]; then
+        DB2CAT="${msgdir?}/${clangdir?}/db2install.cat"
+        DB2ISTR="${msgdir?}/${clangdir?}/db2istring.cat"
+        LANGUAGEDIR=${clangdir?}
+    else
+        echo "DBI1055E The message file cannot be found."
+        echo
+        echo "Explanation:  The message file required by this"
+        echo "script is missing from the system; it may have been"
+        echo "deleted or the database products may have been loaded"
+        echo "incorrectly."
+        echo
+        echo "User Response:  Verify that the product option containing"
+        echo "the message file is installed correctly.  If there are"
+        echo "verification errors; reinstall the product option."
+        exit 67
+    fi
+
+    # check if the locale exists.  If not, we'll set LANG to C for any
+    # subprocesses.
+    locale -a 2> /dev/null | grep '^'${locname?}'$' > /dev/null
+    if [ $? -ne 0 ]
+    then
+        locname=C
+    fi
+
+    # if a language was passed in, set LANG - but if not, leave it alone.
+    # (if it isn't a valid language, well, try resetting anyway)
+    if [ ${LANG_CUSTOM?} -eq 0 ]
+    then
+        locale -a 2> /dev/null | grep '^'${LANG:-C}'$' > /dev/null
+        if [ $? -eq 0 ]; then
+            LANG=${locname?}
+        else 
+            # if locname is valid, set LANG to locname
+            locale -a 2> /dev/null | grep '^'${locname:-C}'$' > /dev/null
+            if [ $? -eq 0 ]; then
+                LANG=${locname?}
+            fi
+        fi
+    fi
+
+    # Set LANG and NLSPATH variables for use by dspmsg command
+    NLSPATH="${msgdir?}/%L/%N:${msgdir?}/${clangdir?}/%N"
+    SHORTLANG=`${CMD_DB2LANGDIR?} ${LANG:-C} -short`
+
+    export LANG NLSPATH
+}
+
+set_lang ()
+{
+    set ${setopts?}
+    set_lang_internal ${BINDIR?} ${INSTALLER_SOURCE?}/locale $1
+}
+
+set_options ()
+{
+   set ${setopts?}
+   INSTALLFIXPACK_OPTS=" -l ${LOGFILE?} "
+
+   if [ "X${TRCFILE?}" != "X" ]; then
+       INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -t ${TRCFILE?} "
+   fi
+   if [ "X${FP_LOCATION?}" != "X" ]; then
+      INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -p ${FP_LOCATION?} "
+   fi
+
+   if [ "X${HOSTS_FILE?}" != "X" ]; then
+      INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -H ${HOSTS_FILE?} "
+   fi
+
+   if [ ${DEBUG?} -eq ${TRUE?} ]; then
+      INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -d "
+   fi
+   if [ ${LOCAL_FP?} -eq ${TRUE?} ]; then
+      INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -L "
+   fi
+   INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -w ${RUNLOCATION?} "
+   INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -z ${PROGDIR?}/../../.. " 
+   if [ "X${BASE_DIR?}" != "X" ]; then
+       INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -b ${BASE_DIR?} "
+   else
+       INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -b ${install_home?} "
+   fi
+
+   if [ ${REMOTE_HOST?} -eq ${TRUE?} ]; then
+      INSTALLFIXPACK_OPTS="${INSTALLFIXPACK_OPTS?} -R "
+   fi
+
+   for f in ${FORCE_OPTIONS?}; do
+       if [ "X${f?}" = "Xlevel" ]; then
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="LEVEL"
+          else
+             FORCE_KEY="LEVEL,${FORCE_KEY?}" 
+          fi
+       elif  [ "X${f?}" = "Xdb2lib" ]; then
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="DB2LIB"
+          else
+             FORCE_KEY="DB2LIB,${FORCE_KEY?}"
+          fi
+       elif  [ "X${f?}" = "Xinstall" ]; then
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="INSTALL"
+          else
+             FORCE_KEY="INSTALL,${FORCE_KEY?}"
+          fi
+       elif  [ "X${f?}" = "Xupdate" ]; then
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="UPDATE"
+          else
+             FORCE_KEY="UPDATE,${FORCE_KEY?}"
+          fi
+       elif  [ "X${f?}" = "Xha_standby_ignore" ]; then
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="HA_STANDBY_IGNORE"
+          else
+             FORCE_KEY="HA_STANDBY_IGNORE,${FORCE_KEY?}"
+          fi
+       elif  [ "X${f?}" = "XnoWPAR" ]; then
+          
+             syntax;
+          
+          if [ "X${FORCE_KEY?}" = "X" ]; then
+             FORCE_KEY="NOWPAR"
+          else
+             FORCE_KEY="NOWPAR,${FORCE_KEY?}"
+          fi          
+       elif  [ "X${f?}" = "Xsysreq" ]; then
+          FORCE_INSTALL=${TRUE?}
+       elif  [ "X${f?}" = "XNOTSAMP" ]; then
+          INSTALL_TSAMP="NO"
+       elif  [ "X${f?}" = "Xnobackup" ]; then
+          BACKUP_BYPASS="YES"
+       elif  [ "X${f?}" = "Xprecopy_db2_binary_only" ]; then
+         if [ ${LOCAL_FP?} -eq ${TRUE?} ]; then
+           COPY_DB2_BINARY_ONLY="YES"
+         else
+           syntax;
+         fi
+       elif  [ "X${f?}" = "XTSAGPFSonly" ]; then
+         if [ ${LOCAL_FP?} -eq ${TRUE?} ]; then 
+           TSA_GPFS_ONLY="YES"
+         else
+           syntax;
+         fi
+       else
+          syntax
+       fi
+   done
+}
+
+sh_which_ ()
+{
+    set ${setopts?}
+
+    file=$1
+    search_path=$2
+    if [ -z "${search_path?}" ]
+    then
+      search_path="$PATH"
+    fi
+    echo ${search_path?} | sed -e 's/:/\
+/g' | while read path; do
+    if [ -x "${path?}/${file?}" ]
+    then
+        echo "${path?}/${file?}"
+        return 0
+    fi
+    done
+}
+
+sh_which ()
+{
+    set ${setopts?}
+    text=`sh_which_ "$@"`
+    # set return code based on whether there is any output.
+    if [ -z "${text?}" ]
+    then
+        return 1
+    else
+        echo "${text?}"
+        return 0
+    fi
+}
+
+check_gunzip ()
+{
+    set ${setopts?}
+    sh_which gunzip > /dev/null
+    if [ $? -ne 0 ]
+    then
+        display_msg ${DB2CAT?} 58 "DBI1058E gunzip command not found."
+        exit 67
+    fi
+}
+# Function to add or remove certain path to or from the specified
+# environment variable.
+
+AddRemoveString()
+{
+    if [ $# -ne 3 ]; then
+       return 0
+    fi
+    var=$1        #The enviornment variable to be processed
+    addrm_str=$2  #The new path to be used
+    action=$3     #Action: a -> add, r -> remove
+    if [ "X${action?}" != "Xa" -a "X${action?}" != "Xr" ]; then
+        return 0  # return without doing anything
+    fi
+    awkval='$1 != "'${addrm_str?}'"{print $0}'
+    newval=`eval echo \\${$var:-""} | awk '{for (i=1; i<= NF; ++i) \
+          if( $i != VAR && length($i) > 0 ) print $i":"}' FS=":" VAR=${addrm_str?} | \
+          tr -d '\n'`
+    if [ "X${action?}" = "Xa" ]; then
+        newval=${newval?}"${addrm_str?}"
+    else
+        newval=`echo ${newval?} | sed 's/:$//'`
+    fi
+    eval $var=\"${newval?}\"
+    unset var addrm_str awkval newval
+}
+
+setRootEnv () {
+  set ${setopts?}
+
+  DB2_INSTNAME=${DB2INSTANCE:=""}
+  if [ "X${DB2_INSTNAME?}" = "X" ]; then
+     return 0
+  fi 
+  if [ $# -ne 1 ]; then
+     echo "Usage: $0 <directory which contains db2usrinf"
+     exit 67
+  fi
+  db2ustinf_dir=$1
+  db2ustinf_cmd="${db2ustinf_dir?}/db2usrinf"
+  if [ ! -f "${db2ustinf_cmd?}" ]; then
+     echo "ERROR: The command db2usrinf can not be found at ${db2ustinf_dir?}"
+     exit 67
+  fi
+
+  if [ `${db2ustinf_cmd?} -E` -ne 0 ]; then
+     return 0
+  fi
+
+  CUR_INSTHOME=`${db2ustinf_cmd?} -d ${DB2_INSTNAME?}`
+  path_list="bin adm misc"
+  class_list="java/db2java.zip java/db2jcc4.jar java/sqlj4.zip function \
+  java/db2jcc_license_cisuz.jar java/db2jcc_license_cu.jar \
+               java/runtime.zip"
+
+  for tmp_entry in ${path_list?}; do
+        AddRemoveString PATH ${CUR_INSTHOME?}/sqllib/${tmp_entry?} r
+        AddRemoveString PATH_ORG ${CUR_INSTHOME?}/sqllib/${tmp_entry?} r
+  done
+  for tmp_entry in ${class_list?}; do
+        AddRemoveString CLASSPATH ${CUR_INSTHOME?}/sqllib/${tmp_entry?} r
+        AddRemoveString CLASSPATH_ORG ${CUR_INSTHOME?}/sqllib/${tmp_entry?} r
+  done
+
+  for path_name in LD_LIBRARY_PATH LIBPATH SHLIB_PATH LD_LIBRARY_PATH_32 \
+        LD_LIBRARY_PATH_64 LD_LIBRARY_PATH_ORG LIBPATH_ORG SHLIB_PATH_ORG \
+        LD_LIBRARY_PATH_32_ORG LD_LIBRARY_PATH_64_ORG ; do
+        for tmp_path in lib lib32 lib64; do
+           AddRemoveString ${path_name?} ${CUR_INSTHOME?}/sqllib/${tmp_path?} r
+        done
+  done
+
+  for path_name in PATH CLASSPATH LD_LIBRARY_PATH LIBPATH SHLIB_PATH \
+        LD_LIBRARY_PATH_32 LD_LIBRARY_PATH_64 PATH_ORG CLASSPATH_ORG \
+        LD_LIBRARY_PATH_ORG LIBPATH_ORG SHLIB_PATH_ORG LD_LIBRARY_PATH_32_ORG \
+        LD_LIBRARY_PATH_64_ORG ; do
+        eval path_value=\$$path_name
+        if [ "X${path_value}" = "X" ]; then
+           unset ${path_name?}
+        else
+           export ${path_name?}
+        fi
+  done
+
+  DASWORKDIR=${DASWORKDIR:=""}
+  if [ "X${DASWORKDIR}" != "X" ]; then
+    AddRemoveString PATH ${DASWORKDIR?}/bin r
+    AddRemoveString PATH_ORG ${DASWORKDIR?}/adm r
+    for path_name in LIBPATH SHLIB_PATH LD_LIBRARY_PATH LIBPATH_ORG SHLIB_PATH_ORG \
+                     LD_LIBRARY_PATH_ORG; do
+      for tmp_path in lib function; do
+          AddRemoveString ${path_name?} ${DASWORKDIR?}/${tmp_path?} r
+      done
+    done
+    for path_name in PATH LIBPATH SHLIB_PATH LD_LIBRARY_PATH \
+                     PATH_ORG SHLIB_PATH_ORG LIBPATH_ORG LD_LIBRARY_PATH_ORG ; do
+        if [ "X${path_name}" = "X" ]; then
+           unset ${path_name?}
+        else
+           export ${path_name?}
+        fi
+    done
+  fi
+  unset DB2_INSTNAME path_list class_list tmp_entry path_name path_value DB2INSTANCE DASWORKDIR
+}
+
+#-----------------------------------------------------------------------#
+#                End of function definitions
+#-----------------------------------------------------------------------#
+
+#-----------------------------------------------------------------------#
+#                             Main program
+#-----------------------------------------------------------------------#
+
+set ${setopts?}
+
+#Even though this is not a clean solution to identify whether to run installfixpack/db2update, we don't a have a better option at this time.
+for PARAM
+   do
+   if [ "$PARAM" = "-I" ]
+   then
+      ISDB2UPDATE=${TRUE?}
+   fi
+   if [ "$PARAM" = "-show_level_info" ]
+   then
+      ISDB2UPDATE=${TRUE?}
+   fi
+done;
+
+if [ $ISDB2UPDATE -ne ${TRUE?} ]; then
+
+initialization # Set up environment for DB2 Installer
+
+check_gunzip   # ensure gunzip is available
+
+# Process command-line options
+
+if [ ! -z "$1" ]; then
+   if [ $1 = "-?" ]
+   then
+      helpmsg
+   fi
+fi 
+
+while getopts :b:c:l:t:f:p:H:yYLdhnR optchar; do
+            case ${optchar?} in
+                b)  # uninstall one feature
+                    BASE_DIR=${OPTARG?} 
+                    chk_abs_path ${BASE_DIR?}
+                    if [ $? -ne ${TRUE?} ]; then
+                        syntax
+                    fi
+                    ;;
+                c)  # Other CD locations
+                    TMP_LOC=${OPTARG?}
+                    chk_abs_path ${TMP_LOC?}
+                    if [ $? -ne ${TRUE?} ]; then
+                        syntax
+                    fi
+                    if [ "X${PACKAGE_LOCATION?}" = "X" \
+                      -o "X${PACKAGE_LOCATION?}" = "X " ]; then
+                        PACKAGE_LOCATION="${TMP_LOC?} "
+                    else
+                        PACKAGE_LOCATION="${PACKAGE_LOCATION?} ${TMP_LOC?} "
+                    fi
+                    ;;
+                f)  # Force options. 
+                    TMP_FORCE=${OPTARG?}
+                    if [ "X${TMP_FORCE?}" = "Xlevel"  ]; then
+                       FORCE_LEVEL=${TRUE?}
+                    fi
+                    if [ "X${TMP_FORCE?}" = "Xsysreq" ]; then
+                       FORCE_INSTALL=${TRUE?}
+                    fi
+                    if [ "X${TMP_FORCE?}" = "X-f" -o -z "${OPTARG?}" ]; then
+                       syntax
+                    fi
+                    if [ "X${FORCE_OPTIONS?}" = "X" \
+                      -o "X${FORCE_OPTIONS?}" = "X " ]; then
+                        FORCE_OPTIONS="${TMP_FORCE?} "
+                    else
+                        FORCE_OPTIONS="${FORCE_OPTIONS?} ${TMP_FORCE?} "
+                    fi
+                    ;;
+                n)  # Non-Interactive mode
+                    BASE_PROMPT=1
+                    ;;
+                l)  # customized log file name and/or location
+                    if [ -z "${OPTARG?}" ]
+                    then
+                        syntax
+                    fi
+                    LOGFILE="${OPTARG?}"
+                    # Check if absolute path was given
+                    chk_abs_path ${LOGFILE?}
+                    if [ $? -ne ${TRUE?} ]; then
+                        LOGFILE="${TOPDIR?}/${LOGFILE?}"
+                    fi
+                    ;;
+                t)  # customized trace file name and/or location
+                    if [ -z "${OPTARG?}" ]
+                    then
+                        syntax
+                    fi
+                    TRCFILE="${OPTARG?}"
+                    # Check if absolute path was given
+                    chk_abs_path ${TRCFILE?}
+                    if [ $? -ne ${TRUE?} ]; then
+                       TRCFILE="${TOPDIR?}/${TRCFILE?}"
+                    fi
+                    TRACE=${TRUE?}
+                    ;;
+                p)  # newFixpackLocation for db2iure 
+                    if [ -z "${OPTARG?}" ]; then
+                        syntax
+                    fi
+                    FP_LOCATION="${OPTARG?}"
+                    chk_abs_path ${FP_LOCATION?}
+                    if [ $? -ne ${TRUE?} ]; then
+                        syntax
+                    fi
+                    ;;
+                H)  #hosts list file
+                    if [ -z "${OPTARG?}" ]; then
+                       syntax
+                    fi
+
+                    HOSTS_FILE="${OPTARG?}"
+                    chk_abs_path ${HOSTS_FILE?}
+                    if [ $? -ne ${TRUE?} ]; then
+                       HOSTS_FILE="${TOPDIR?}/${HOSTS_FILE?}"
+                    fi
+                    ;;
+                d)  # debug mode used for IBM Support
+                    DEBUG=${TRUE?}
+                    setopts="-x"
+                    ;;
+                y|Y)
+                    ACCEPT_LIC=${TRUE?}
+                    ;;
+                L)  # apply fixpack locally 
+                    LOCAL_FP=${TRUE?}
+                    ;;              
+                R)  # internal flag
+                    REMOTE_HOST=${TRUE?}
+                    ;;      
+                h)  # Display help
+                     helpmsg 
+                    ;;
+                \?) #Invalid option
+                    syntax
+                    ;;
+            esac
+done
+shift `expr $OPTIND - 1` # Detele all option args
+if [ "X$1" != "X" -a ${BASE_PROMPT?} -ne ${TRUE?} ]; then
+   syntax
+fi 
+
+if [ "X${TRCFILE?}" != "X" ]; then
+    chk_file_creation ${TRCFILE?}
+fi
+if [ "X${LOGFILE?}" != "X" ]; then
+    chk_file_creation ${LOGFILE?}
+fi
+
+chk_sysreq
+
+set ${setopts?}
+
+chk_sysreq_post
+if [ `${PROGDIR?}/../bin/db2usrinf -E` -eq 0 ]; then
+   if [ "X${install_home?}" = "X" -a "X${BASE_DIR?}" = "X" -a ${BASE_PROMPT?} -eq ${TRUE?} ]; then
+      display_msg ${DB2CAT?} 5014 \
+               "Enter the full path of the base installation directory:\n"
+      echo "-------------------------------------------------------"
+      read BASE_DIR
+      echo
+      chk_abs_path ${BASE_DIR?}
+      if [ $? -ne ${TRUE?} ]; then
+         syntax
+      fi
+   fi
+
+   _if_downgrading_is_it_allowed
+
+else
+   set_nr_instance_env "${PROGDIR?}/../bin/db2usrinf"
+   if [ -f "${install_home?}/acs/setup_db2.sh" \
+        -a -d "${install_home?}/.metadata" \
+        -a -f "${install_home?}/instance/db2rfe" ]; then
+        db2_acs_stop_disable  ${install_user?} "stop" "${install_home?}" "${PROGNAME?}"
+   fi
+
+   _if_downgrading_is_it_allowed
+
+   cd ${curdir?}
+fi
+
+if [ "X${BASE_DIR?}" != "X" ]; then
+   if [ ! -d "${BASE_DIR?}" -o ! -f "${BASE_DIR?}/bin/db2usrinf" ]; then
+      display_msg ${DB2CAT?} 391 'DBI1391E  "%s" is not a valid path.' ${BASE_DIR?}
+      exit 67
+   fi
+fi
+
+DB2DIR=${BASE_DIR?} 
+has_cf_copy
+BASE_HAS_CF_COPY=$?
+if [ ${BASE_HAS_CF_COPY?} -eq ${TRUE?} ]; then
+   if [ -f ${BASE_DIR?}/instance/db2ilist ]; then
+       ${BASE_DIR?}/instance/db2ilist -a -s dsf | grep dsf > /dev/null 2>&1
+       BASE_HAS_SD_INST=$?
+   fi
+else
+   if [ "X${HOSTS_FILE?}" != "X" ]; then
+      display_msg ${DB2CAT?} 461 \
+            "DBI1461E The DB2 installer detected the base copy does not contain IBM DB2 pureScale Feature components."
+      exit 461      
+   fi
+fi
+
+if [ "X${HOSTS_FILE?}" != "X" -a  ${LOCAL_FP?} -eq ${TRUE?} ]; then
+   display_msg ${DB2CAT?} 464 \
+         "DBI1464E Conflicting installFixPack command parameters specified.\n  Parameters: %s" "-L,-H "
+   exit 464
+fi
+
+if [ `${PROGDIR?}/../bin/db2usrinf -E` -eq 0  -a "X${FP_LOCATION?}" = "X" -a ${BASE_PROMPT?} -eq ${TRUE?} ]; then
+   NEW_FP_PATH=${TRUE?}
+   if [ ${BASE_HAS_SD_INST?} -eq ${FALSE?} ]; then
+      NEW_FP_PATH_CHOICE=""
+      display_msg ${DB2CAT?} 5065 \
+               "Do you want to choose a different installation directory for the fix pack [yes/no] ?\n"
+      echo "------------------------------------------------------------------------------------"
+      read NEW_FP_PATH_CHOICE
+      echo
+      echo ${NEW_FP_PATH_CHOICE?} | grep -i "yes" > /dev/null 2>&1
+      NEW_FP_PATH=$?
+   fi
+   if [ ${NEW_FP_PATH?} -eq ${TRUE?} ]; then
+      display_msg ${DB2CAT?} 5066 \
+               "Enter the full path for the fix pack installation directory:\n"
+      echo "------------------------------------------------------------"
+      read FP_LOCATION
+      echo
+      chk_abs_path ${FP_LOCATION?}
+      if [ $? -ne ${TRUE?} ]; then
+         syntax
+      fi
+   else
+      FP_LOCATION=${BASE_DIR?}
+   fi
+fi
+
+if [ "X${HOSTS_FILE?}" != "X" -a "X${FP_LOCATION?}" = "X" ]; then
+    syntax
+fi
+
+if [ "X${HOSTS_FILE?}" != "X" ]; then
+   ##check file exists, and validate hosts( syntax and grammar) 
+   chk_hosts_file ${HOSTS_FILE?}
+   if [ "$?" -ne ${TRUE?} ]; then
+       display_msg ${DB2CAT?} 465 "DBI1465E An error occurred in the host list file. Host file: %s." ${HOSTS_FILE?}
+       exit 465
+   fi
+fi
+
+if [ `${PROGDIR?}/../bin/db2usrinf -E` -eq 0 ]; then
+   if [ "X${BASE_DIR?}" = "X" -a ${BASE_PROMPT?} -ne ${TRUE?} ]; then
+      display_msg ${DB2CAT?} 73 \
+          "DBI1073E: The parameter %s is missing. This parameter is required for the %s command.\n" "-b" "installFixPack"
+      syntax
+   fi
+   if [ ${BASE_HAS_SD_INST?} -eq ${TRUE?} \
+         -a "X${FP_LOCATION?}" = "X" \
+         -a ${BASE_PROMPT?} -ne ${TRUE?} ]; then
+      display_msg ${DB2CAT?} 73 \
+          "DBI1073E: The parameter %s is missing. This parameter is required for the %s command.\n" "-p" "installFixPack"
+      syntax
+   fi
+else
+   set_nr_instance_env "${PROGDIR?}/../bin/db2usrinf"
+   if [ -f "${install_home?}/acs/setup_db2.sh" \
+        -a -d "${install_home?}/.metadata" \
+        -a -f "${install_home?}/instance/db2rfe" ]; then
+        db2_acs_stop_disable  ${install_user?} "stop" "${install_home?}" "${PROGNAME?}"
+   fi
+   cd ${curdir?}
+fi
+
+if [ "X${BASE_DIR?}" != "X" ]; then
+   chk_copy_owner "${BASE_DIR?}"
+fi
+
+set_options
+copy_install_local   # copy installer files
+cp ${INSTALLER_SOURCE?}/${PROGNAME?}_exec ${INSTALLFIXPACK_EXEC?}
+chmod -R 755 ${INSTALLER_TOP?}
+
+if [ $? -ne ${TRUE?} ]; then
+     display_msg ${DB2CAT?} 86 \
+          "DBI1086E An attempt to copy the file or directory %s to %s failed.\n" \
+           ${INSTALLER_SOURCE?}/${PROGNAME?}_exec ${INSTALLFIXPACK_EXEC?}
+     exit 67
+fi
+
+generate_response    # create response file
+
+reset_path
+exec ${INSTALLFIXPACK_EXEC?} ${INSTALLFIXPACK_OPTS?}
+
+else
+
+PROGNAME="db2update"
+
+DB2UPDATE_EXEC="db2update_exe"
+
+initialization # Set up environment for DB2 Installer
+
+check_gunzip   # ensure gunzip is available
+
+chk_sysreq_post
+
+copy_install_local   # copy installer files
+
+cp ${INSTALLER_SOURCE?}/${PROGNAME?}_exe ${DB2UPDATE_EXEC?}
+chmod -R 755 ${INSTALLER_TOP?}
+
+if [ $? -ne ${TRUE?} ]; then
+     display_msg ${DB2CAT?} 86 \
+          "DBI1086E An attempt to copy the file or directory %s to %s failed.\n" \
+           ${INSTALLER_SOURCE?}/${PROGNAME?}_exec ${DB2UPDATE_EXEC?}
+     exit 67
+fi
+
+# Pass runtime location and package location to db2update executable
+
+# Get the package location, before that get the current directory
+
+CURDIR=`/bin/pwd`
+cd ${PROGDIR?}/../../../
+PKGLOCATION=`/bin/pwd`
+cd ${CURDIR?}
+
+exec ${DB2UPDATE_EXEC?} -rpath ${PROGDIR?} -pkgpath ${PKGLOCATION?} "$@"
+
+fi

@@ -1,0 +1,471 @@
+#!/bin/sh
+#############################################################################
+#
+# Licensed Materials - Property of IBM
+#
+# "Restricted Materials of IBM" 
+#
+# (C) COPYRIGHT IBM Corp. 1993, 2020 All Rights Reserved.
+#
+# US Government Users Restricted Rights - Use, duplication or
+# disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
+#
+#############################################################################
+
+#
+# NAME: installFixPack_exec
+#
+# FUNCTION: installFixPack_exec - Apply FixPack images on top of an installed 
+#                                 DB2 location.
+#                               - Has to be called by installFixPack
+#
+########################################################################
+
+# Options for "set" command
+setopts="${setopts:-+x}"
+set ${setopts?}
+
+TRUE=0                     # True variable
+FALSE=1                    # False variable
+LOGFILE=""                 # Log file
+TRCFILE=""                 # Trace file
+DEBUG=${FALSE?}
+LOCAL_FP=${FALSE?}
+PKGLOC=""
+BASE_DIR=""
+FP_LOCATION=""
+REMOTE_HOST=${FALSE?}
+HOSTS_FILE=""
+
+PROGNAME=`basename $0` # Program name
+curdir=`/bin/pwd`
+
+#-----------------------------------------------------------------------#
+#               Start of function definitions
+#-----------------------------------------------------------------------#
+
+# To display the command syntax
+syntax ()
+{
+    #display_msg ${DB2CAT?} 54 \
+   #"DBI1054I Usage: installFixPack -b <baseInstallPathOfDB2>  \
+   #                 [-c <imagelocation >] ... [-f]  [-l <logFile>] \
+   #                 [-t <traceFile>] [-n]  [-h | -?]"
+  msgidx=41701 #starting message index
+   lastidx=41726 #one greater than last index
+
+   while [ ${msgidx?} -lt ${lastidx?} ]
+   do
+       display_msg ${DB2ISTR?} $msgidx \
+       "Failed to load the message\n"
+
+   msgidx=`expr ${msgidx?} + 1`
+   
+   done
+    exit 67
+}
+
+# Default initialization for command execution
+initialization ()
+{
+    set ${setopts?}
+    INSTALLERDIR=${WORKING_DIR?}
+    
+    CD_PLATDIR=linux
+    INSTALLER_SOURCE="${WORKING_DIR?}/db2/${CD_PLATDIR?}/install"
+    INSTALLFIXPACK_EXEC_OPTS=""
+    CMD_DB2IURE="${INSTALLER_SOURCE?}/db2iure"
+    BINDIR="${INSTALLER_SOURCE?}/../bin"
+    DISPMSGDIR=${BINDIR?}
+    CMD_DB2LANGDIR=${BINDIR?}/db2langdir
+    RSP_FILE=${INSTALLERDIR?}/${PROGNAME?}.rsp
+
+    PATH=".:"${PATH}
+    export PATH
+    LIBPATH=.:${INSTALLER_SOURCE?}:${LIBPATH}
+    export LIBPATH
+    LD_LIBRARY_PATH=.:${INSTALLER_SOURCE?}:${LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH
+    SHLIB_PATH=.:${INSTALLER_SOURCE?}:${SHLIB_PATH}
+    export SHLIB_PATH
+
+    LANG_ORG=${LANG}
+    export LANG_ORG
+    set_lang
+}
+
+chk_options ()
+{
+   set ${setopts?}
+   if [ "X${LOGFILE?}" = "X" ]; then
+       echo "Error: -l <LOGFILE> was not passed to ${PROGNAME?}"
+       display_msg ${DB2CAT?} 69 \
+            "DBI1069E Unexpected error. Function = %s, Return code = %s.\n" \
+            chk_options 111
+       exit 67
+   fi
+
+   if [ ! -f ${RSP_FILE?} ]; then
+       echo "The response file ${RSP_FILE?} could not be found."
+       display_msg ${DB2CAT?} 69 \
+            "DBI1069E Unexpected error. Function = %s, Return code = %s.\n" \
+            chk_options 444
+       exit 67
+   fi
+
+   if [ "X${PKGLOC?}" = "X" ]; then
+       echo "Error: -d <packageLocation> is missing."
+       display_msg ${DB2CAT?} 69 \
+            "DBI1069E Unexpected error. Function = %s, Return code = %s.\n" \
+            chk_options 777
+       exit 67
+   fi
+
+   if [ "X${BASE_DIR?}" = "X" ]; then
+       echo "Error: -b <baseInstallPathOfDB2> is missing."
+       display_msg ${DB2CAT?} 69 \
+            "DBI1069E Unexpected error. Function = %s, Return code = %s.\n" \
+            chk_options 888 
+       exit 67
+   fi
+
+   INSTALLFIXPACK_EXEC_OPTS=" -l ${LOGFILE?} "
+   if [ "X${TRCFILE?}" != "X" ]; then
+       INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -t ${TRCFILE?} "
+   fi
+   if [ ${LOCAL_FP?} -eq ${TRUE?} ]; then
+      INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -L "
+   fi
+
+   if [ ${REMOTE_HOST?} -eq ${TRUE?} ]; then
+      INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -R "
+   fi
+
+   if [ "X${FP_LOCATION?}" != "X" ]; then
+      INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -newFixpackLocation ${FP_LOCATION?} "
+   fi
+
+   if [ "X${HOSTS_FILE?}" != "X" ]; then
+      INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -hostsfilegiven "
+   fi
+
+   INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -idir ${INSTALLER_SOURCE?} "
+   INSTALLFIXPACK_EXEC_OPTS="${INSTALLFIXPACK_EXEC_OPTS?} -r ${RSP_FILE?} "
+   INSTALLFIXPACK_EXEC_OPTS=" ${INSTALLFIXPACK_EXEC_OPTS?} -packageLocation ${PKGLOC?} "
+   INSTALLFIXPACK_EXEC_OPTS=" ${INSTALLFIXPACK_EXEC_OPTS?} -action UPDATE "
+}
+
+sh_which_ ()
+{
+    set ${setopts?}
+
+    file=$1
+    search_path=$2
+    if [ -z "${search_path?}" ]
+    then
+      search_path="$PATH"
+    fi
+    echo ${search_path?} | sed -e 's/:/\
+/g' | while read path; do
+    if [ -x "${path?}/${file?}" ]
+    then
+        echo "${path?}/${file?}"
+        return 0
+    fi
+    done
+}
+
+sh_which ()
+{
+    set ${setopts?}
+    text=`sh_which_ "$@"`
+    # set return code based on whether there is any output.
+    if [ -z "${text?}" ]
+    then
+        return 1
+    else
+        echo "${text?}"
+        return 0
+    fi
+}
+
+TRUE=0
+FALSE=1
+
+if [ -z "${TRACTRAXLOG}" ]; then
+    _trace_tee ()
+    {
+      cat
+    }
+else
+    _trace_tee ()
+    {
+      tee -a ${TRACTRAXLOG}
+    }
+fi
+
+# To display a message when a function is called
+trac ()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## Entering: $*" >&2 | _trace_tee
+    fi
+}
+
+# To display a message when exiting a function
+trax()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## Exiting: $*"  >&2 | _trace_tee
+    fi
+}
+
+# To display a message when "debug" is set
+dmsg ()
+{
+    if [ ${DEBUG?} -eq ${TRUE?} ]; then
+        echo "## $*"  >&2 | _trace_tee
+    fi
+}
+
+#-----------------------------------------------------------------------
+# Name       - display_msg
+# Function   - Displays a message from the message catalog
+# Parameters - $1 - name of the message catalog
+#            - $2 - message number
+#            - $3 - default message string
+#            - $4,$5,$6 - arguments to substitute in msg string, if needed
+#-----------------------------------------------------------------------
+display_msg()
+{
+    set ${setopts?}
+
+    unset catname msgid deftmsg msgstr warnmsg infomsg
+    catname="$1"
+    msgid=$2
+    deftmsg="$3"
+    warnmsg=${FALSE?}
+    infomsg=${FALSE?}
+
+    echo ${deftmsg?} | grep "DBI....W" 1>/dev/null 2>/dev/null
+    if [ $? -eq 0 ]; then
+        warnmsg=${TRUE?}
+    fi
+
+    echo ${deftmsg?} | grep "DBI....I" 1>/dev/null 2>/dev/null
+    if [ $? -eq 0 ]; then
+        infomsg=${TRUE?}
+    fi
+
+    # Do not display message if NODISPLAY is set
+    if [ -z "${NODISPLAY}" ]; then
+        NODISPLAY=${FALSE?}
+    fi
+
+    if [ ${NODISPLAY?} -eq ${TRUE?} ]; then
+        return ${TRUE?}
+    fi
+
+    # Increment the message count only if it is not a warning or information
+    if [ ${warnmsg?} -eq ${FALSE?} -a ${infomsg?} -eq ${FALSE?} ]; then
+
+        # if MSGCOUNT isn't set, we'll just get 1, hence don't use the ? check. 
+        MSGCOUNT=`expr "${MSGCOUNT:-0}" + 1`
+    fi
+
+    shift ; shift ; shift
+
+    disp_msg_file=`sh_which disp_msg \
+         ${DISPMSGDIR:=${DB2DIR}}:${DISPMSGDIR?}/instance:${DISPMSGDIR?}/bin:${DISPMSGDIR?}/..`
+ 
+   sh_which_rc=$?
+ 
+    if [ -z "${DISPMSGLOG}" ]; then
+        dispmsg_tee_cmd="cat"
+    else
+        dispmsg_tee_cmd="tee -a ${DISPMSGLOG}"
+    fi
+
+    if [ ${sh_which_rc?} -eq 0 ]; then
+        ${disp_msg_file?} 1 ${msgid} ${catname} "${deftmsg}" "$@" 2>&1 | ${dispmsg_tee_cmd?}
+    else
+        echo "disp_msg does not exist"
+    fi
+
+}
+
+set_lang_internal ()
+{
+    set ${setopts?}
+    bindir="$1"
+    msgdir="$2"
+    lang="$3"
+
+    CMD_DB2LANGDIR="${bindir?}/db2langdir"
+
+    if [ "X$lang" != "X" ]; then
+       LANG_CUSTOM=0
+    else
+       LANG_CUSTOM=1
+    fi
+    # Default locale name and locale-specific message directory
+    
+    LANG=${LANG:-C}
+    locname=${LANG?}
+    
+    if [ ${LANG_CUSTOM?} -eq 0 ]; then
+       locname=`${CMD_DB2LANGDIR?} ${lang?} -locale`
+       DB2_LANG_JAVA=${locname?}
+    fi
+
+    langdir=`${CMD_DB2LANGDIR?} ${locname?}`
+    clangdir=`${CMD_DB2LANGDIR?} C`
+
+    if [ -f ${msgdir?}/${langdir?}/db2install.cat -a -f ${msgdir?}/${langdir?}/db2istring.cat ]; then
+        DB2CAT="${msgdir?}/${langdir?}/db2install.cat"
+        DB2ISTR="${msgdir?}/${langdir?}/db2istring.cat"
+        LANGUAGEDIR=${langdir?}
+    elif [ -f ${msgdir?}/${clangdir?}/db2install.cat -a -f ${msgdir?}/${clangdir?}/db2istring.cat ]; then
+        DB2CAT="${msgdir?}/${clangdir?}/db2install.cat"
+        DB2ISTR="${msgdir?}/${clangdir?}/db2istring.cat"
+        LANGUAGEDIR=${clangdir?}
+    else
+        echo "DBI1055E The message file cannot be found."
+        echo
+        echo "Explanation:  The message file required by this"
+        echo "script is missing from the system; it may have been"
+        echo "deleted or the database products may have been loaded"
+        echo "incorrectly."
+        echo
+        echo "User Response:  Verify that the product option containing"
+        echo "the message file is installed correctly.  If there are"
+        echo "verification errors; reinstall the product option."
+        exit 67
+    fi
+
+    # check if the locale exists.  If not, we'll set LANG to C for any
+    # subprocesses.
+    locale -a 2> /dev/null | grep '^'${locname?}'$' > /dev/null
+    if [ $? -ne 0 ]
+    then
+        locname=C
+    fi
+
+    # if a language was passed in, set LANG - but if not, leave it alone.
+    # (if it isn't a valid language, well, try resetting anyway)
+    if [ ${LANG_CUSTOM?} -eq 0 ]
+    then
+        locale -a 2> /dev/null | grep '^'${LANG:-C}'$' > /dev/null
+        if [ $? -eq 0 ]; then
+            LANG=${locname?}
+        else 
+            # if locname is valid, set LANG to locname
+            locale -a 2> /dev/null | grep '^'${locname:-C}'$' > /dev/null
+            if [ $? -eq 0 ]; then
+                LANG=${locname?}
+            fi
+        fi
+    fi
+
+    # Set LANG and NLSPATH variables for use by dspmsg command
+    NLSPATH="${msgdir?}/%L/%N:${msgdir?}/${clangdir?}/%N"
+    SHORTLANG=`${CMD_DB2LANGDIR?} ${LANG:-C} -short`
+
+    export LANG NLSPATH
+}
+
+set_lang ()
+{
+    set ${setopts?}
+    set_lang_internal ${BINDIR?} ${INSTALLER_SOURCE?}/locale $1
+}
+
+# Clean up copied installer files
+clean_installer_files ()
+{
+  set ${setopts?}
+  if [ -n "${WORKING_DIR?}" -a "${WORKING_DIR?}" != "/" -a -d "${WORKING_DIR?}" ]; then
+    cd /
+    rm -rf "${WORKING_DIR?}"
+
+    if [ $? -ne ${TRUE?} ]; then
+      echo "The directory ${WORKING_DIR?} could not be cleaned."
+    fi
+  fi
+}
+
+#-----------------------------------------------------------------------#
+#                End of function definitions
+#-----------------------------------------------------------------------#
+
+#-----------------------------------------------------------------------#
+#                             Main program
+#-----------------------------------------------------------------------#
+
+set ${setopts?}
+
+# Process command-line options
+case $# in
+    0) 
+        syntax ;;
+    *)
+        while getopts :l:b:t:w:p:H:z:dLhR optchar; do
+            case ${optchar?} in
+                l)  # customized log file name and/or location
+                    LOGFILE=${OPTARG?} 
+                    ;;
+                t)  # customized trace file name and/or location
+                    TRCFILE=${OPTARG?}
+                    ;;
+                w)  # Installer working directory
+                    WORKING_DIR=${OPTARG?}
+                    ;;
+                d)  # Debug mode (keep working directory)
+                    DEBUG=${TRUE?}
+                    setopts="-x"
+                    ;;
+                z)  # packageLocation for db2iure
+                    PKGLOC=${OPTARG?}
+                    ;;
+                p)  # newFixpackLocation for db2iure 
+                    FP_LOCATION=${OPTARG?}
+                    ;;
+                H)  # hosts list file for db2iure
+                    HOSTS_FILE=${OPTARG?}
+                    ;;
+                b)  # base installation directory
+                    BASE_DIR=${OPTARG?}
+                    ;;
+                L)  # apply fixpack locally 
+                    LOCAL_FP=${TRUE?}
+                    ;;
+                R)  # intelnal flag for pureScale
+                    REMOTE_HOST=${TRUE?}
+                    ;;
+                h|?)  # Display help
+                    syntax 
+                    ;;
+            esac
+        done
+        shift `expr $OPTIND - 1` # Detele all option args
+        if [ "X$1" != "X" ]; then
+            syntax
+        fi        
+        ;;
+esac
+
+set ${setopts?}
+
+initialization # Set up environment for DB2 Installer
+chk_options
+
+display_msg ${DB2CAT?} 17 "DBI1017I installFixPack is updating the DB2 \
+         product(s) installed in location %s.\n" ${BASE_DIR?}
+
+${CMD_DB2IURE?} ${INSTALLFIXPACK_EXEC_OPTS?}
+URE_RC=$?
+
+if [ ${DEBUG?} -ne ${TRUE?} ]; then
+   clean_installer_files
+fi
+exit ${URE_RC?}

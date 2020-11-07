@@ -1,0 +1,19 @@
+ code-server:
+    image: linuxserver/code-server
+    container_name: code-server
+    environment:
+      - PUID=1100
+      - PGID=1100
+      - TZ=America/New_York
+       - PASSWORD=Orion123
+       - SUDO_PASSWORD=Orion123
+      #  - PROXY_DOMAIN=code-server.scoyotenet.local
+    volumes:
+      - /Users/samuelcroker/Documents/repositories:/repositories
+      - /Users/samuelcroker/SAS_Platform/vscode/config:/config
+      - /Users/samuelcroker/SAS_Platform/shared:/shared
+    ports:
+      - 8443:8443
+    restart: unless-stopped
+    networks:
+      - sasbridge
