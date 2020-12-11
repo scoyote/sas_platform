@@ -20,100 +20,100 @@ services:
   #   networks:
   #     - sasbridge
 
-  db_pg:
-    image: postgres:platform
-    build:
-      context: ./postgres_build
-      dockerfile: Dockerfile-postgres
-    container_name: sas-postgres
-    volumes:
-      - /Users/samuelcroker/SAS_Platform/data_postgres:/var/lib/postgresql/data/pgdata
-    restart: always
-    ports:
-      - 5432:5432
-    environment:
-      POSTGRES_PASSWORD: Orion123
-      PGDATA: /var/lib/postgresql/data/pgdata
-      VIRTUAL_HOST: sasnet.postgres
-    networks:
-      - sasbridge
+  # db_pg:
+  #   image: postgres:platform
+  #   build:
+  #     context: ./postgres_build
+  #     dockerfile: Dockerfile-postgres
+  #   container_name: sas-postgres
+  #   volumes:
+  #     - /Users/samuelcroker/SAS_Platform/data_postgres:/var/lib/postgresql/data/pgdata
+  #   restart: always
+  #   ports:
+  #     - 5432:5432
+  #   environment:
+  #     POSTGRES_PASSWORD: Orion123
+  #     PGDATA: /var/lib/postgresql/data/pgdata
+  #     VIRTUAL_HOST: sasnet.postgres
+  #   networks:
+  #     - sasbridge
 
-  db_oracle:
-    image: oracle:platform
-    build:
-      context: ./oracle_build
-      dockerfile: Dockerfile-oracle
-    container_name: sas-oracle
-    volumes:
-      - /Users/samuelcroker/SAS_Platform/data_oracle/oradata:/opt/oracle/oradata
-      - /Users/samuelcroker/SAS_Platform/data_oracle/scripts:/opt/oracle/scripts/setup
-      - /Users/samuelcroker/SAS_Platform/data_oracle/startup:/opt/oracle/scripts/startup
-    restart: always
-    ports:
-      - 1521:1521
-      - 5500:5500
-    # environment:
-    #   ORACLE_PWD: ORION123
-    #   ORACLE_CHARACTERSET: AL32UTF8]   
-    networks:
-      - sasbridge
+  # # db_oracle:
+  # #   image: oracle:platform
+  # #   build:
+  # #     context: ./oracle_build
+  # #     dockerfile: Dockerfile-oracle
+  # #   container_name: sas-oracle
+  # #   volumes:
+  # #     - /Users/samuelcroker/SAS_Platform/data_oracle/oradata:/opt/oracle/oradata
+  # #     - /Users/samuelcroker/SAS_Platform/data_oracle/scripts:/opt/oracle/scripts/setup
+  # #     - /Users/samuelcroker/SAS_Platform/data_oracle/startup:/opt/oracle/scripts/startup
+  # #   restart: always
+  # #   ports:
+  # #     - 1521:1521
+  # #     - 5500:5500
+  # #   # environment:
+  # #   #   ORACLE_PWD: ORION123
+  # #   #   ORACLE_CHARACTERSET: AL32UTF8]   
+  # #   networks:
+  # #     - sasbridge
 
-  db_db2:
-    image: db2:platform
-    build:
-      context: ./db2_build
-      dockerfile: Dockerfile-db2
-    container_name: sas-db2
-    volumes:
-     - /Users/samuelcroker/SAS_Platform/data_db2:/database
-    restart: always
-    ports:
-     - 50000:50000
-    privileged: true
-    environment:
-      LICENSE: accept 
-      DB2INST1_PASSWORD: Orion123 
-      DBNAME: testdb
-    networks:
-     - sasbridge
+  # db_db2:
+  #   image: db2:platform
+  #   build:
+  #     context: ./db2_build
+  #     dockerfile: Dockerfile-db2
+  #   container_name: sas-db2
+  #   volumes:
+  #    - /Users/samuelcroker/SAS_Platform/data_db2:/database
+  #   restart: always
+  #   ports:
+  #    - 50000:50000
+  #   privileged: true
+  #   environment:
+  #     LICENSE: accept 
+  #     DB2INST1_PASSWORD: Orion123 
+  #     DBNAME: testdb
+  #   networks:
+  #    - sasbridge
 
 
 
-  an_python:
-    image: scoyote/pythonswat:platform
-    build:
-      context: ./python
-      dockerfile: Dockerfile-python
-    container_name: python-swat
-    volumes:
-      - /Users/samuelcroker/Documents/repositories:/repositories
-      - /Users/samuelcroker/SAS_Platform/shared:/shared
-    restart: unless-stopped
-    user: sas
-    command: /bin/bash -c "jupyter notebook --allow-root --notebook-dir=/shared --ip='*' --port=8888 --no-browser --NotebookApp.token=''"
-    ports:
-      - 8888:8888
-    environment:
-      VIRTUAL_HOST: sasnet.pythonswat
-    networks:
-      - sasbridge
+  # an_python:
+  #   image: scoyote/pythonswat:platform
+  #   build:
+  #     context: ./python
+  #     dockerfile: Dockerfile-python
+  #   container_name: python-swat
+  #   volumes:
+  #     - /Users/samuelcroker/Documents/repositories:/repositories
+  #     - /Users/samuelcroker/SAS_Platform/shared:/shared
+  #   restart: unless-stopped
+  #   user: sas
+  #   command: /bin/bash -c "jupyter notebook --allow-root --notebook-dir=/shared --ip='*' --port=8888 --no-browser --NotebookApp.token=''"
+  #   ports:
+  #     - 8888:8888
+  #   environment:
+  #     VIRTUAL_HOST: sasnet.pythonswat
+  #   networks:
+  #     - sasbridge
 
-  an_r:
-    image: scoyote/rswat:platform
-    build:
-      context: ./rocker
-      dockerfile: Dockerfile-rocker
-    container_name: r-swat
-    volumes:
-      - /Users/samuelcroker/Documents/repositories:/repositories
-      - /Users/samuelcroker/SAS_Platform/shared:/shared
-    restart: unless-stopped
-    environment:
-      VIRTUAL_HOST: sasnet.rswat
-    ports:
-      - 8787:8787
-    networks:
-      - sasbridge
+  # an_r:
+  #   image: scoyote/rswat:platform
+  #   build:
+  #     context: ./rocker
+  #     dockerfile: Dockerfile-rocker
+  #   container_name: r-swat
+  #   volumes:
+  #     - /Users/samuelcroker/Documents/repositories:/repositories
+  #     - /Users/samuelcroker/SAS_Platform/shared:/shared
+  #   restart: unless-stopped
+  #   environment:
+  #     VIRTUAL_HOST: sasnet.rswat
+  #   ports:
+  #     - 8787:8787
+  #   networks:
+  #     - sasbridge
 
   # code-server:
   #   image: linuxserver/code-server
